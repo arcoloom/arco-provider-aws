@@ -27,6 +27,8 @@ service ProviderService {
   rpc GetProviderInfo(GetProviderInfoRequest) returns (GetProviderInfoResponse);
   rpc ValidateConnection(ValidateConnectionRequest) returns (ValidateConnectionResponse);
   rpc Ping(PingRequest) returns (PingResponse);
+  rpc ListRegions(ListRegionsRequest) returns (ListRegionsResponse);
+  rpc ListAvailabilityZones(ListAvailabilityZonesRequest) returns (ListAvailabilityZonesResponse);
   rpc GetSpotData(GetSpotDataRequest) returns (GetSpotDataResponse);
   rpc StartInstance(StartInstanceRequest) returns (StartInstanceResponse);
   rpc StopInstance(StopInstanceRequest) returns (StopInstanceResponse);
@@ -116,6 +118,7 @@ Recommendations:
 | `account_id` | `string` | Account, tenant, or project scope identifier. |
 | `region` | `string` | Logical region. Some RPCs use it as the default region. |
 | `endpoint` | `string` | Custom API endpoint. |
+| `endpoint_region` | `string` | Signing or routing region to use with a custom endpoint. |
 | `attributes` | `map<string,string>` | Extension attributes for provider-specific context. |
 
 Design notes:
@@ -276,7 +279,8 @@ Call semantics:
 
 - `accepted=false` means business-level validation failed; it does not necessarily mean the RPC itself failed.
 - Hosts can use this as a preflight check, but should not assume every provider performs a full connectivity test.
-- In the current sample implementation, this RPC returns `accepted=false` with a `NOT_IMPLEMENTED` warning, so callers should tolerate bootstrap-state providers.
+- The current sample implementation validates STS caller identity, optional account scoping, and EC2 regional read access.
+- If `DescribeAvailabilityZones` is denied, the current sample may still accept the connection and return a `REGION_VALIDATION_SKIPPED` warning.
 
 ### 4.3 `Ping`
 
@@ -299,7 +303,73 @@ Response: `PingResponse`
 
 The current sample implementation returns `pong:<payload>`.
 
-### 4.4 `GetSpotData`
+### 4.4 `ListRegions`
+
+Purpose: List regions that are currently enabled and visible to the supplied account.
+
+Request: `ListRegionsRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `context` | `RequestContext` | No | Request context. |
+| `credentials` | `Credentials` | Yes | Credentials required to read live account metadata. |
+| `scope` | `ConnectionScope` | No | Default region, endpoint, and execution context. |
+| `options` | `map<string,string>` | No | Provider-specific extension options. |
+
+Response: `ListRegionsResponse`
+
+Each `items` element is a `CloudRegion`:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `code` | `string` | Region code. |
+| `name` | `string` | Display name. |
+
+Implementation notes:
+
+- The current sample uses live EC2 account metadata, so results are not limited to catalog-covered regions.
+- When catalog region names are available, the provider enriches `name`; otherwise it may fall back to the region code.
+- If a custom endpoint is used, `scope.region` or a provider default may still be used as the base signing region for the initial EC2 call.
+
+### 4.5 `ListAvailabilityZones`
+
+Purpose: List availability zones currently enabled and visible to the supplied account.
+
+Request: `ListAvailabilityZonesRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `context` | `RequestContext` | No | Request context. |
+| `credentials` | `Credentials` | Yes | Credentials required to read live account metadata. |
+| `scope` | `ConnectionScope` | No | Default region, endpoint, and execution context. |
+| `region` | `string` | No | Target region, or `all` to fan out across enabled regions. |
+| `availability_zones` | `repeated string` | No | Optional zone-name or zone-ID filter list. |
+| `options` | `map<string,string>` | No | Provider-specific extension options. |
+
+Response: `ListAvailabilityZonesResponse`
+
+Each `items` element is an `AvailabilityZone`:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Availability zone name. |
+| `zone_id` | `string` | Stable availability zone ID. |
+| `region` | `string` | Region code. |
+| `state` | `string` | Zone state. |
+| `zone_type` | `string` | Zone type such as `availability-zone`, `local-zone`, or `wavelength-zone`. |
+| `group_name` | `string` | Zone group name. |
+| `network_border_group` | `string` | Network border group name. |
+| `parent_zone_id` | `string` | Parent zone ID for Local/Wavelength Zones when present. |
+| `parent_zone_name` | `string` | Parent zone name for Local/Wavelength Zones when present. |
+| `opt_in_status` | `string` | AWS opt-in status. |
+
+Implementation notes:
+
+- If `region` is empty, the provider falls back to `scope.region`; if both are empty, the current sample may fan out across all enabled regions.
+- The current sample matches `availability_zones` against either zone names or stable zone IDs.
+- Missing requested zones may be returned as warnings such as `AZ_NOT_FOUND`.
+
+### 4.6 `GetSpotData`
 
 Purpose: Query spot, preemptible, or interruptible capacity pricing and availability data.
 
@@ -340,7 +410,7 @@ Implementation notes:
 - If the caller uses an all-regions selector, the provider may fan out across multiple regions.
 - If a requested availability zone does not exist, the RPC may still succeed and return warnings such as `AZ_NOT_FOUND`.
 
-### 4.5 `StartInstance`
+### 4.7 `StartInstance`
 
 Purpose: Create or start a compute instance.
 
@@ -351,11 +421,11 @@ Request: `StartInstanceRequest`
 | `context` | `RequestContext` | No | Request context. |
 | `credentials` | `Credentials` | Yes | Credentials required to create resources. |
 | `scope` | `ConnectionScope` | No | Default region, endpoint, and execution context. |
-| `stack_name` | `string` | Yes | Deployment or orchestration unit name. |
-| `instance_name` | `string` | Yes | Instance name. |
+| `stack_name` | `string` | Yes | Provider-managed grouping key used for tagging and later lookup. |
+| `instance_name` | `string` | No | Instance name. Defaults to `stack_name` when omitted. |
 | `region` | `string` | No | Target region. |
 | `availability_zone` | `string` | No | Target availability zone. |
-| `ami` | `string` | Yes | Image or template identifier. The field name follows the current proto. |
+| `ami` | `string` | No | Image or template identifier. The field name follows the current proto. |
 | `instance_type` | `string` | Yes | Instance type. |
 | `market_type` | `InstanceMarketType` | No | Capacity purchase model. |
 | `subnet_id` | `string` | No | Network subnet identifier. |
@@ -369,22 +439,24 @@ Response: `StartInstanceResponse`
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `stack_name` | `string` | Deployment unit name actually used by the provider. |
+| `stack_name` | `string` | Grouping key actually used by the provider. |
 | `instance_id` | `string` | Instance identifier. |
-| `urn` | `string` | Uniform resource name from the provider or backing IaC engine. |
+| `urn` | `string` | Reserved compatibility field. The direct AWS SDK implementation leaves it empty. |
 | `public_ip` | `string` | Public IP address. |
 | `private_ip` | `string` | Private IP address. |
 | `warnings` | `repeated Warning` | Non-blocking warnings. |
 
-Current sample defaults:
+Current sample behavior:
 
-- If `region` is empty, the provider falls back to `scope.region`, then to a provider default region.
+- `region` must be supplied explicitly for `StartInstance`. The provider does not fall back to `scope.region` or a default region.
 - If `market_type` is empty, it defaults to `INSTANCE_MARKET_TYPE_ON_DEMAND`.
-- The current implementation validates that `stack_name`, `instance_name`, `ami`, and `instance_type` are non-empty.
+- If `instance_name` is empty, the provider defaults it to `stack_name`.
+- If `ami` is empty, the provider resolves the latest Debian 13 AMI from Debian's public SSM parameters based on the instance architecture.
+- The current implementation validates that `stack_name` and `instance_type` are non-empty.
 
-### 4.6 `StopInstance`
+### 4.8 `StopInstance`
 
-Purpose: Stop, destroy, or reclaim an instance managed by the provider.
+Purpose: Terminate EC2 instances managed by the provider.
 
 Request: `StopInstanceRequest`
 
@@ -393,20 +465,20 @@ Request: `StopInstanceRequest`
 | `context` | `RequestContext` | No | Request context. |
 | `credentials` | `Credentials` | Yes | Credentials required to destroy resources. |
 | `scope` | `ConnectionScope` | No | Connection scope. |
-| `stack_name` | `string` | Yes | Target deployment unit name. |
+| `stack_name` | `string` | Yes | Grouping key used to locate managed instances. |
 | `options` | `map<string,string>` | No | Provider-specific extension options. |
 
 Response: `StopInstanceResponse`
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `stack_name` | `string` | Deployment unit that was processed. |
+| `stack_name` | `string` | Grouping key that was processed. |
 | `destroyed` | `bool` | Whether the resource was successfully destroyed. |
 | `warnings` | `repeated Warning` | Non-blocking warnings. |
 
-The current sample implementation requires `stack_name` to be non-empty.
+The current sample implementation requires both `stack_name` and `scope.region`, and terminates instances matched by the `ArcoloomStack=<stack_name>` tag.
 
-### 4.7 `ListInstanceTypes`
+### 4.9 `ListInstanceTypes`
 
 Purpose: List summarized instance type records, suitable for pickers, search results, and catalog pages.
 
@@ -446,7 +518,7 @@ Implementation notes:
 - The current sample implementation matches `series`, `instance_types`, `architectures`, and `generation` case-insensitively.
 - If requested instance types are not found, the provider may return `INSTANCE_TYPE_NOT_FOUND` warnings.
 
-### 4.8 `GetInstanceTypeInfo`
+### 4.10 `GetInstanceTypeInfo`
 
 Purpose: Return detailed information for one or more instance types.
 
@@ -496,7 +568,7 @@ Usage guidance:
 - Use `ListInstanceTypes` for lightweight catalog pages.
 - Call this RPC when you need hardware traits, supported regions, or richer provider attributes.
 
-### 4.9 `GetInstancePrices`
+### 4.11 `GetInstancePrices`
 
 Purpose: Query instance pricing.
 
@@ -720,7 +792,8 @@ To set expectations for the example implementation in this repository:
 
 - `GetProviderInfo` is implemented and returns provider metadata, auth schemes, and capability declarations.
 - `Ping` is implemented and returns `pong:<payload>` with the current UTC time.
-- `ValidateConnection` is currently a placeholder and returns `accepted=false` with a `NOT_IMPLEMENTED` warning.
+- `ValidateConnection` is implemented and validates STS caller identity plus regional EC2 read access.
+- `ListRegions` and `ListAvailabilityZones` are implemented and expose live account location discovery.
 - `ListInstanceTypes`, `GetInstanceTypeInfo`, and `GetInstancePrices` are implemented and suitable for catalog and pricing flows.
 - `StartInstance` and `StopInstance` are implemented, but some field names still reflect historical proto naming.
 

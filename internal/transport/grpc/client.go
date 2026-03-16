@@ -78,6 +78,36 @@ func (c *Client) Ping(ctx context.Context, req provider.RequestContext, payload 
 	}, nil
 }
 
+func (c *Client) ListRegions(ctx context.Context, req provider.ListRegionsRequest) (provider.ListRegionsResult, error) {
+	resp, err := c.client.ListRegions(c.withAuth(ctx), &providerv1.ListRegionsRequest{
+		Context:     toProtoContext(req.Context),
+		Credentials: toProtoCredentials(req.Credentials),
+		Scope:       toProtoScope(req.Scope),
+		Options:     req.Options,
+	})
+	if err != nil {
+		return provider.ListRegionsResult{}, err
+	}
+
+	return toDomainListRegionsResult(resp), nil
+}
+
+func (c *Client) ListAvailabilityZones(ctx context.Context, req provider.ListAvailabilityZonesRequest) (provider.ListAvailabilityZonesResult, error) {
+	resp, err := c.client.ListAvailabilityZones(c.withAuth(ctx), &providerv1.ListAvailabilityZonesRequest{
+		Context:           toProtoContext(req.Context),
+		Credentials:       toProtoCredentials(req.Credentials),
+		Scope:             toProtoScope(req.Scope),
+		Region:            req.Region,
+		AvailabilityZones: req.AvailabilityZones,
+		Options:           req.Options,
+	})
+	if err != nil {
+		return provider.ListAvailabilityZonesResult{}, err
+	}
+
+	return toDomainListAvailabilityZonesResult(resp), nil
+}
+
 func (c *Client) GetSpotData(ctx context.Context, req provider.GetSpotDataRequest) (provider.GetSpotDataResult, error) {
 	resp, err := c.client.GetSpotData(c.withAuth(ctx), &providerv1.GetSpotDataRequest{
 		Context:           toProtoContext(req.Context),
@@ -134,6 +164,24 @@ func (c *Client) StopInstance(ctx context.Context, req provider.StopInstanceRequ
 	}
 
 	return toDomainStopInstanceResult(resp), nil
+}
+
+func (c *Client) ListActiveInstances(ctx context.Context, req provider.ListActiveInstancesRequest) (provider.ListActiveInstancesResult, error) {
+	resp, err := c.client.ListActiveInstances(c.withAuth(ctx), &providerv1.ListActiveInstancesRequest{
+		Context:           toProtoContext(req.Context),
+		Credentials:       toProtoCredentials(req.Credentials),
+		Scope:             toProtoScope(req.Scope),
+		Regions:           req.Regions,
+		AvailabilityZones: req.AvailabilityZones,
+		InstanceTypes:     req.InstanceTypes,
+		Tags:              toProtoInstanceTags(req.Tags),
+		Options:           req.Options,
+	})
+	if err != nil {
+		return provider.ListActiveInstancesResult{}, err
+	}
+
+	return toDomainListActiveInstancesResult(resp)
 }
 
 func (c *Client) ListInstanceTypes(ctx context.Context, req provider.ListInstanceTypesRequest) (provider.ListInstanceTypesResult, error) {

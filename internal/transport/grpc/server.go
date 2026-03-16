@@ -83,6 +83,60 @@ func (s *Server) Ping(ctx context.Context, req *providerv1.PingRequest) (*provid
 	}, nil
 }
 
+func (s *Server) ListRegions(ctx context.Context, req *providerv1.ListRegionsRequest) (*providerv1.ListRegionsResponse, error) {
+	domainReq := provider.ListRegionsRequest{
+		Context:     toDomainContext(req.GetContext()),
+		Credentials: toDomainCredentials(req.GetCredentials()),
+		Scope:       toDomainScope(req.GetScope()),
+		Options:     req.GetOptions(),
+	}
+
+	result, err := s.service.ListRegions(ctx, domainReq)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Info(
+		"regions listed",
+		"request_id", domainReq.Context.RequestID,
+		"items", len(result.Items),
+	)
+
+	return &providerv1.ListRegionsResponse{
+		Items:    toProtoRegions(result.Items),
+		Warnings: toProtoWarnings(result.Warnings),
+	}, nil
+}
+
+func (s *Server) ListAvailabilityZones(ctx context.Context, req *providerv1.ListAvailabilityZonesRequest) (*providerv1.ListAvailabilityZonesResponse, error) {
+	domainReq := provider.ListAvailabilityZonesRequest{
+		Context:           toDomainContext(req.GetContext()),
+		Credentials:       toDomainCredentials(req.GetCredentials()),
+		Scope:             toDomainScope(req.GetScope()),
+		Region:            req.GetRegion(),
+		AvailabilityZones: req.GetAvailabilityZones(),
+		Options:           req.GetOptions(),
+	}
+
+	result, err := s.service.ListAvailabilityZones(ctx, domainReq)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Info(
+		"availability zones listed",
+		"request_id", domainReq.Context.RequestID,
+		"region", domainReq.Region,
+		"availability_zones", len(domainReq.AvailabilityZones),
+		"items", len(result.Items),
+	)
+
+	return &providerv1.ListAvailabilityZonesResponse{
+		Items:    toProtoAvailabilityZones(result.Items),
+		Warnings: toProtoWarnings(result.Warnings),
+	}, nil
+}
+
 func (s *Server) GetSpotData(ctx context.Context, req *providerv1.GetSpotDataRequest) (*providerv1.GetSpotDataResponse, error) {
 	domainReq := provider.GetSpotDataRequest{
 		Context:           toDomainContext(req.GetContext()),
@@ -183,6 +237,39 @@ func (s *Server) StopInstance(ctx context.Context, req *providerv1.StopInstanceR
 		StackName: result.StackName,
 		Destroyed: result.Destroyed,
 		Warnings:  toProtoWarnings(result.Warnings),
+	}, nil
+}
+
+func (s *Server) ListActiveInstances(ctx context.Context, req *providerv1.ListActiveInstancesRequest) (*providerv1.ListActiveInstancesResponse, error) {
+	domainReq := provider.ListActiveInstancesRequest{
+		Context:           toDomainContext(req.GetContext()),
+		Credentials:       toDomainCredentials(req.GetCredentials()),
+		Scope:             toDomainScope(req.GetScope()),
+		Regions:           req.GetRegions(),
+		AvailabilityZones: req.GetAvailabilityZones(),
+		InstanceTypes:     req.GetInstanceTypes(),
+		Tags:              toDomainInstanceTags(req.GetTags()),
+		Options:           req.GetOptions(),
+	}
+
+	result, err := s.service.ListActiveInstances(ctx, domainReq)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Info(
+		"active instances listed",
+		"request_id", domainReq.Context.RequestID,
+		"regions", len(domainReq.Regions),
+		"availability_zones", len(domainReq.AvailabilityZones),
+		"instance_types", len(domainReq.InstanceTypes),
+		"tags", len(domainReq.Tags),
+		"items", len(result.Items),
+	)
+
+	return &providerv1.ListActiveInstancesResponse{
+		Items:    toProtoActiveInstances(result.Items),
+		Warnings: toProtoWarnings(result.Warnings),
 	}, nil
 }
 

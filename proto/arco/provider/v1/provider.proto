@@ -8,9 +8,12 @@ service ProviderService {
   rpc GetProviderInfo(GetProviderInfoRequest) returns (GetProviderInfoResponse);
   rpc ValidateConnection(ValidateConnectionRequest) returns (ValidateConnectionResponse);
   rpc Ping(PingRequest) returns (PingResponse);
+  rpc ListRegions(ListRegionsRequest) returns (ListRegionsResponse);
+  rpc ListAvailabilityZones(ListAvailabilityZonesRequest) returns (ListAvailabilityZonesResponse);
   rpc GetSpotData(GetSpotDataRequest) returns (GetSpotDataResponse);
   rpc StartInstance(StartInstanceRequest) returns (StartInstanceResponse);
   rpc StopInstance(StopInstanceRequest) returns (StopInstanceResponse);
+  rpc ListActiveInstances(ListActiveInstancesRequest) returns (ListActiveInstancesResponse);
   rpc ListInstanceTypes(ListInstanceTypesRequest) returns (ListInstanceTypesResponse);
   rpc GetInstanceTypeInfo(GetInstanceTypeInfoRequest) returns (GetInstanceTypeInfoResponse);
   rpc GetInstancePrices(GetInstancePricesRequest) returns (GetInstancePricesResponse);
@@ -118,6 +121,32 @@ message PingResponse {
   ProviderMetadata metadata = 3;
 }
 
+message ListRegionsRequest {
+  RequestContext context = 1;
+  Credentials credentials = 2;
+  ConnectionScope scope = 3;
+  map<string, string> options = 4;
+}
+
+message ListRegionsResponse {
+  repeated CloudRegion items = 1;
+  repeated Warning warnings = 2;
+}
+
+message ListAvailabilityZonesRequest {
+  RequestContext context = 1;
+  Credentials credentials = 2;
+  ConnectionScope scope = 3;
+  string region = 4;
+  repeated string availability_zones = 5;
+  map<string, string> options = 6;
+}
+
+message ListAvailabilityZonesResponse {
+  repeated AvailabilityZone items = 1;
+  repeated Warning warnings = 2;
+}
+
 message GetSpotDataRequest {
   RequestContext context = 1;
   Credentials credentials = 2;
@@ -204,6 +233,39 @@ message StopInstanceResponse {
   repeated Warning warnings = 3;
 }
 
+message ListActiveInstancesRequest {
+  RequestContext context = 1;
+  Credentials credentials = 2;
+  ConnectionScope scope = 3;
+  repeated string regions = 4;
+  repeated string availability_zones = 5;
+  repeated string instance_types = 6;
+  repeated InstanceTag tags = 7;
+  map<string, string> options = 8;
+}
+
+message ActiveInstance {
+  string instance_id = 1;
+  string name = 2;
+  string region = 3;
+  string availability_zone = 4;
+  string instance_type = 5;
+  string state = 6;
+  InstanceMarketType market_type = 7;
+  string public_ip = 8;
+  string private_ip = 9;
+  repeated string ipv6_addresses = 10;
+  string subnet_id = 11;
+  string vpc_id = 12;
+  string launch_time = 13;
+  repeated InstanceTag tags = 14;
+}
+
+message ListActiveInstancesResponse {
+  repeated ActiveInstance items = 1;
+  repeated Warning warnings = 2;
+}
+
 enum PurchaseOption {
   PURCHASE_OPTION_UNSPECIFIED = 0;
   PURCHASE_OPTION_ON_DEMAND = 1;
@@ -219,6 +281,19 @@ enum AcceleratorKind {
 message CloudRegion {
   string code = 1;
   string name = 2;
+}
+
+message AvailabilityZone {
+  string name = 1;
+  string zone_id = 2;
+  string region = 3;
+  string state = 4;
+  string zone_type = 5;
+  string group_name = 6;
+  string network_border_group = 7;
+  string parent_zone_id = 8;
+  string parent_zone_name = 9;
+  string opt_in_status = 10;
 }
 
 message Accelerator {

@@ -74,12 +74,60 @@ func toProtoSpotData(items []provider.SpotData) []*providerv1.SpotData {
 	return result
 }
 
+func toProtoActiveInstances(items []provider.ActiveInstance) []*providerv1.ActiveInstance {
+	result := make([]*providerv1.ActiveInstance, 0, len(items))
+	for _, item := range items {
+		protoItem := &providerv1.ActiveInstance{
+			InstanceId:       item.InstanceID,
+			Name:             item.Name,
+			Region:           item.Region,
+			AvailabilityZone: item.AvailabilityZone,
+			InstanceType:     item.InstanceType,
+			State:            item.State,
+			MarketType:       toProtoInstanceMarketType(item.MarketType),
+			PublicIp:         item.PublicIP,
+			PrivateIp:        item.PrivateIP,
+			Ipv6Addresses:    item.IPv6Addresses,
+			SubnetId:         item.SubnetID,
+			VpcId:            item.VPCID,
+			Tags:             toProtoInstanceTags(item.Tags),
+		}
+		if !item.LaunchTime.IsZero() {
+			protoItem.LaunchTime = item.LaunchTime.Format(time.RFC3339)
+		}
+
+		result = append(result, protoItem)
+	}
+
+	return result
+}
+
 func toProtoRegions(regions []provider.Region) []*providerv1.CloudRegion {
 	result := make([]*providerv1.CloudRegion, 0, len(regions))
 	for _, region := range regions {
 		result = append(result, &providerv1.CloudRegion{
 			Code: region.Code,
 			Name: region.Name,
+		})
+	}
+
+	return result
+}
+
+func toProtoAvailabilityZones(zones []provider.AvailabilityZone) []*providerv1.AvailabilityZone {
+	result := make([]*providerv1.AvailabilityZone, 0, len(zones))
+	for _, zone := range zones {
+		result = append(result, &providerv1.AvailabilityZone{
+			Name:               zone.Name,
+			ZoneId:             zone.ZoneID,
+			Region:             zone.Region,
+			State:              zone.State,
+			ZoneType:           zone.ZoneType,
+			GroupName:          zone.GroupName,
+			NetworkBorderGroup: zone.NetworkBorderGroup,
+			ParentZoneId:       zone.ParentZoneID,
+			ParentZoneName:     zone.ParentZoneName,
+			OptInStatus:        zone.OptInStatus,
 		})
 	}
 
@@ -277,6 +325,29 @@ func toDomainRegions(regions []*providerv1.CloudRegion) []provider.Region {
 		result = append(result, provider.Region{
 			Code: region.GetCode(),
 			Name: region.GetName(),
+		})
+	}
+
+	return result
+}
+
+func toDomainAvailabilityZones(zones []*providerv1.AvailabilityZone) []provider.AvailabilityZone {
+	result := make([]provider.AvailabilityZone, 0, len(zones))
+	for _, zone := range zones {
+		if zone == nil {
+			continue
+		}
+		result = append(result, provider.AvailabilityZone{
+			Name:               zone.GetName(),
+			ZoneID:             zone.GetZoneId(),
+			Region:             zone.GetRegion(),
+			State:              zone.GetState(),
+			ZoneType:           zone.GetZoneType(),
+			GroupName:          zone.GetGroupName(),
+			NetworkBorderGroup: zone.GetNetworkBorderGroup(),
+			ParentZoneID:       zone.GetParentZoneId(),
+			ParentZoneName:     zone.GetParentZoneName(),
+			OptInStatus:        zone.GetOptInStatus(),
 		})
 	}
 

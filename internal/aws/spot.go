@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +24,7 @@ const (
 	defaultSpotProduct         = "Linux/UNIX"
 	defaultTargetCapacity      = int32(1)
 	regionSelectorAll          = "all"
+	optionRegions              = "regions"
 	inventoryStatusUnavailable = "unavailable"
 	inventoryStatusHigh        = "high"
 	inventoryStatusMedium      = "medium"
@@ -51,8 +51,12 @@ type ec2API interface {
 	DescribeAvailabilityZones(context.Context, *ec2.DescribeAvailabilityZonesInput, ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error)
 	DescribeInstanceTypeOfferings(context.Context, *ec2.DescribeInstanceTypeOfferingsInput, ...func(*ec2.Options)) (*ec2.DescribeInstanceTypeOfferingsOutput, error)
 	DescribeInstanceTypes(context.Context, *ec2.DescribeInstanceTypesInput, ...func(*ec2.Options)) (*ec2.DescribeInstanceTypesOutput, error)
+	DescribeImages(context.Context, *ec2.DescribeImagesInput, ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
 	DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+	DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
 	DescribeSpotPriceHistory(context.Context, *ec2.DescribeSpotPriceHistoryInput, ...func(*ec2.Options)) (*ec2.DescribeSpotPriceHistoryOutput, error)
+	DescribeSubnets(context.Context, *ec2.DescribeSubnetsInput, ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
+	DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
 	GetSpotPlacementScores(context.Context, *ec2.GetSpotPlacementScoresInput, ...func(*ec2.Options)) (*ec2.GetSpotPlacementScoresOutput, error)
 	RunInstances(context.Context, *ec2.RunInstancesInput, ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
 	TerminateInstances(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
@@ -60,6 +64,7 @@ type ec2API interface {
 
 type ssmAPI interface {
 	GetParameter(context.Context, *ssm.GetParameterInput, ...func(*ssm.Options)) (*ssm.GetParameterOutput, error)
+	GetParametersByPath(context.Context, *ssm.GetParametersByPathInput, ...func(*ssm.Options)) (*ssm.GetParametersByPathOutput, error)
 }
 
 type stsAPI interface {
@@ -181,7 +186,10 @@ func (s *Service) GetSpotData(ctx context.Context, req provider.GetSpotDataReque
 		return provider.GetSpotDataResult{}, errors.New("at least one instance type is required")
 	}
 
-	baseRegion := effectiveBaseRegion(req)
+	baseRegion, err := effectiveBaseRegion(req)
+	if err != nil {
+		return provider.GetSpotDataResult{}, err
+	}
 	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
 	if err != nil {
 		return provider.GetSpotDataResult{}, err
@@ -244,99 +252,32 @@ func effectiveEndpointRegion(scope provider.ConnectionScope, fallbackRegion stri
 	return fallbackRegion
 }
 
-func effectiveBaseRegion(req provider.GetSpotDataRequest) string {
-	switch {
-	case req.Region != "" && !isAllSelector(req.Region):
-		return req.Region
-	case req.Scope.Region != "" && !isAllSelector(req.Scope.Region):
-		return req.Scope.Region
-	default:
-		return defaultAWSRegion
-	}
+func effectiveBaseRegion(req provider.GetSpotDataRequest) (string, error) {
+	return effectiveDiscoveryBaseRegionWithOptions(req.Region, req.Scope.Region, req.Options)
 }
 
 func resolveRegions(ctx context.Context, client ec2API, req provider.GetSpotDataRequest) ([]string, []provider.Warning, error) {
-	targetRegion := req.Region
-	if targetRegion == "" {
-		targetRegion = req.Scope.Region
-	}
-
-	if targetRegion != "" && !isAllSelector(targetRegion) {
-		return []string{targetRegion}, nil, nil
-	}
-
-	output, err := client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{
-		AllRegions: awsv2.Bool(false),
-	})
+	regions, err := resolveAccountRegionsWithOptions(ctx, client, req.Region, req.Scope.Region, req.Options)
 	if err != nil {
-		return nil, nil, fmt.Errorf("describe regions: %w", err)
+		return nil, nil, err
 	}
-
-	regions := make([]string, 0, len(output.Regions))
-	for _, region := range output.Regions {
-		if name := awsv2.ToString(region.RegionName); name != "" {
-			regions = append(regions, name)
-		}
-	}
-	slices.Sort(regions)
 
 	return regions, nil, nil
 }
 
 func resolveAvailabilityZones(ctx context.Context, client ec2API, region string, requested []string) ([]string, map[string]string, []provider.Warning, error) {
-	output, err := client.DescribeAvailabilityZones(ctx, &ec2.DescribeAvailabilityZonesInput{
-		AllAvailabilityZones: awsv2.Bool(false),
-	})
+	availabilityZones, err := describeAvailabilityZones(ctx, client, region)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("describe availability zones for region %s: %w", region, err)
+		return nil, nil, nil, err
 	}
-
-	requestedSet := make(map[string]struct{}, len(requested))
-	allZones := len(requested) == 0
-	for _, zone := range requested {
-		if isAllSelector(zone) {
-			allZones = true
-			break
-		}
-		if looksLikeAvailabilityZone(zone) && !strings.HasPrefix(zone, region) {
-			continue
-		}
-		requestedSet[zone] = struct{}{}
-	}
-
-	zones := make([]string, 0, len(output.AvailabilityZones))
-	zoneIDToName := make(map[string]string, len(output.AvailabilityZones))
-	seenRequested := make(map[string]struct{}, len(requestedSet))
-	for _, zone := range output.AvailabilityZones {
+	selected, zoneIDToName, warnings := selectAvailabilityZones(region, availabilityZones, requested)
+	zones := make([]string, 0, len(selected))
+	for _, zone := range selected {
 		name := awsv2.ToString(zone.ZoneName)
 		if name == "" {
 			continue
 		}
-		zoneID := awsv2.ToString(zone.ZoneId)
-		if zoneID != "" {
-			zoneIDToName[zoneID] = name
-		}
-		if !allZones {
-			if _, ok := requestedSet[name]; !ok {
-				continue
-			}
-			seenRequested[name] = struct{}{}
-		}
 		zones = append(zones, name)
-	}
-	slices.Sort(zones)
-
-	warnings := make([]provider.Warning, 0)
-	if !allZones {
-		for zone := range requestedSet {
-			if _, ok := seenRequested[zone]; ok {
-				continue
-			}
-			warnings = append(warnings, provider.Warning{
-				Code:    "AZ_NOT_FOUND",
-				Message: fmt.Sprintf("availability zone %s was not found in region %s", zone, region),
-			})
-		}
 	}
 
 	return zones, zoneIDToName, warnings, nil
@@ -541,11 +482,4 @@ func isAllSelector(value string) bool {
 
 func looksLikeAvailabilityZone(value string) bool {
 	return strings.Count(value, "-") >= 2
-}
-
-func max(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

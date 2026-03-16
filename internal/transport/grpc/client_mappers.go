@@ -107,6 +107,44 @@ func toDomainValidateConnectionResult(resp *providerv1.ValidateConnectionRespons
 	}
 }
 
+func toDomainListRegionsResult(resp *providerv1.ListRegionsResponse) provider.ListRegionsResult {
+	if resp == nil {
+		return provider.ListRegionsResult{}
+	}
+
+	warnings := make([]provider.Warning, 0, len(resp.GetWarnings()))
+	for _, warning := range resp.GetWarnings() {
+		warnings = append(warnings, provider.Warning{
+			Code:    warning.GetCode(),
+			Message: warning.GetMessage(),
+		})
+	}
+
+	return provider.ListRegionsResult{
+		Items:    toDomainRegions(resp.GetItems()),
+		Warnings: warnings,
+	}
+}
+
+func toDomainListAvailabilityZonesResult(resp *providerv1.ListAvailabilityZonesResponse) provider.ListAvailabilityZonesResult {
+	if resp == nil {
+		return provider.ListAvailabilityZonesResult{}
+	}
+
+	warnings := make([]provider.Warning, 0, len(resp.GetWarnings()))
+	for _, warning := range resp.GetWarnings() {
+		warnings = append(warnings, provider.Warning{
+			Code:    warning.GetCode(),
+			Message: warning.GetMessage(),
+		})
+	}
+
+	return provider.ListAvailabilityZonesResult{
+		Items:    toDomainAvailabilityZones(resp.GetItems()),
+		Warnings: warnings,
+	}
+}
+
 func toDomainGetSpotDataResult(resp *providerv1.GetSpotDataResponse) (provider.GetSpotDataResult, error) {
 	if resp == nil {
 		return provider.GetSpotDataResult{}, nil
@@ -176,6 +214,57 @@ func toDomainStopInstanceResult(resp *providerv1.StopInstanceResponse) provider.
 		Destroyed: resp.GetDestroyed(),
 		Warnings:  warnings,
 	}
+}
+
+func toDomainListActiveInstancesResult(resp *providerv1.ListActiveInstancesResponse) (provider.ListActiveInstancesResult, error) {
+	if resp == nil {
+		return provider.ListActiveInstancesResult{}, nil
+	}
+
+	items := make([]provider.ActiveInstance, 0, len(resp.GetItems()))
+	for _, item := range resp.GetItems() {
+		if item == nil {
+			continue
+		}
+
+		parsed := provider.ActiveInstance{
+			InstanceID:       item.GetInstanceId(),
+			Name:             item.GetName(),
+			Region:           item.GetRegion(),
+			AvailabilityZone: item.GetAvailabilityZone(),
+			InstanceType:     item.GetInstanceType(),
+			State:            item.GetState(),
+			MarketType:       toDomainInstanceMarketType(item.GetMarketType()),
+			PublicIP:         item.GetPublicIp(),
+			PrivateIP:        item.GetPrivateIp(),
+			IPv6Addresses:    item.GetIpv6Addresses(),
+			SubnetID:         item.GetSubnetId(),
+			VPCID:            item.GetVpcId(),
+			Tags:             toDomainInstanceTags(item.GetTags()),
+		}
+		if timestamp := item.GetLaunchTime(); timestamp != "" {
+			launchTime, err := time.Parse(time.RFC3339, timestamp)
+			if err != nil {
+				return provider.ListActiveInstancesResult{}, fmt.Errorf("parse active instance timestamp: %w", err)
+			}
+			parsed.LaunchTime = launchTime
+		}
+
+		items = append(items, parsed)
+	}
+
+	warnings := make([]provider.Warning, 0, len(resp.GetWarnings()))
+	for _, warning := range resp.GetWarnings() {
+		warnings = append(warnings, provider.Warning{
+			Code:    warning.GetCode(),
+			Message: warning.GetMessage(),
+		})
+	}
+
+	return provider.ListActiveInstancesResult{
+		Items:    items,
+		Warnings: warnings,
+	}, nil
 }
 
 func toDomainListInstanceTypesResult(resp *providerv1.ListInstanceTypesResponse) provider.ListInstanceTypesResult {

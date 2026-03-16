@@ -97,6 +97,62 @@ func TestProviderProcessLifecycleAndBusinessCalls(t *testing.T) {
 		t.Fatalf("unexpected validation warnings: %+v", validateResp.Warnings)
 	}
 
+	regionsResp, err := client.ListRegions(ctx, provider.ListRegionsRequest{
+		Context: provider.RequestContext{
+			RequestID: "req-regions-001",
+			Caller:    "integration-test",
+			TraceID:   "trace-regions-001",
+		},
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "test-access-key",
+				SecretAccessKey: "test-secret-key",
+				SessionToken:    "test-session-token",
+			},
+		},
+		Scope: provider.ConnectionScope{
+			Region:   "us-east-1",
+			Endpoint: fakeAWS.URL,
+		},
+	})
+	if err != nil {
+		t.Fatalf("list regions: %v", err)
+	}
+	if len(regionsResp.Items) != 2 {
+		t.Fatalf("expected 2 regions, got %+v", regionsResp.Items)
+	}
+	if regionsResp.Items[0].Code != "us-east-1" || regionsResp.Items[1].Code != "us-west-2" {
+		t.Fatalf("unexpected regions response: %+v", regionsResp.Items)
+	}
+
+	availabilityZonesResp, err := client.ListAvailabilityZones(ctx, provider.ListAvailabilityZonesRequest{
+		Context: provider.RequestContext{
+			RequestID: "req-az-001",
+			Caller:    "integration-test",
+			TraceID:   "trace-az-001",
+		},
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "test-access-key",
+				SecretAccessKey: "test-secret-key",
+				SessionToken:    "test-session-token",
+			},
+		},
+		Scope: provider.ConnectionScope{
+			Endpoint: fakeAWS.URL,
+		},
+		Region: "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("list availability zones: %v", err)
+	}
+	if len(availabilityZonesResp.Items) != 1 {
+		t.Fatalf("expected 1 availability zone, got %+v", availabilityZonesResp.Items)
+	}
+	if availabilityZonesResp.Items[0].Name != "us-east-1a" || availabilityZonesResp.Items[0].ZoneID != "use1-az1" {
+		t.Fatalf("unexpected availability zones response: %+v", availabilityZonesResp.Items)
+	}
+
 	pingResp, err := client.Ping(ctx, provider.RequestContext{
 		RequestID: "req-ping-001",
 		Caller:    "integration-test",
@@ -141,6 +197,24 @@ func newFakeAWSQueryServer(t *testing.T) *httptest.Server {
     <RequestId>req-sts-001</RequestId>
   </ResponseMetadata>
 </GetCallerIdentityResponse>`)
+		case "DescribeRegions":
+			w.Header().Set("Content-Type", "text/xml")
+			fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <requestId>req-ec2-regions-001</requestId>
+  <regionInfo>
+    <item>
+      <regionName>us-east-1</regionName>
+      <regionEndpoint>ec2.us-east-1.amazonaws.com</regionEndpoint>
+      <optInStatus>opt-in-not-required</optInStatus>
+    </item>
+    <item>
+      <regionName>us-west-2</regionName>
+      <regionEndpoint>ec2.us-west-2.amazonaws.com</regionEndpoint>
+      <optInStatus>opt-in-not-required</optInStatus>
+    </item>
+  </regionInfo>
+</DescribeRegionsResponse>`)
 		case "DescribeAvailabilityZones":
 			w.Header().Set("Content-Type", "text/xml")
 			fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>

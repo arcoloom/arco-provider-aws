@@ -1,0 +1,371 @@
+package aws
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strconv"
+
+	"github.com/arcoloom/arco-provider-aws/internal/provider"
+	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+)
+
+const (
+	optionUseDefaultVPC           = "use_default_vpc"
+	optionUseDefaultSubnet        = "use_default_subnet"
+	optionUseDefaultSecurityGroup = "use_default_security_group"
+	optionAssociatePublicIPv4     = "associate_public_ipv4"
+	optionAssignPublicIPv6        = "assign_public_ipv6"
+	optionIPv6AddressCount        = "ipv6_address_count"
+	optionRootVolumeSizeGiB       = "root_volume_size_gib"
+)
+
+type startInstanceLaunchOptions struct {
+	useDefaultVPC           bool
+	useDefaultSubnet        bool
+	useDefaultSecurityGroup bool
+	hasAssociatePublicIPv4  bool
+	associatePublicIPv4     bool
+	assignPublicIPv6        bool
+	ipv6AddressCount        int32
+	rootVolumeSizeGiB       int32
+}
+
+type resolvedRunInstancesConfig struct {
+	subnetID            string
+	securityGroupIDs    []string
+	useNetworkInterface bool
+	associatePublicIPv4 *bool
+	ipv6AddressCount    int32
+	rootVolumeSizeGiB   int32
+	rootDeviceName      string
+}
+
+func resolveRunInstancesConfig(
+	ctx context.Context,
+	ec2Client ec2API,
+	req provider.StartInstanceRequest,
+	amiID string,
+) (resolvedRunInstancesConfig, error) {
+	options, err := parseStartInstanceLaunchOptions(req.Options)
+	if err != nil {
+		return resolvedRunInstancesConfig{}, err
+	}
+
+	result := resolvedRunInstancesConfig{
+		subnetID:          req.SubnetID,
+		securityGroupIDs:  append([]string(nil), req.SecurityGroupIDs...),
+		rootVolumeSizeGiB: options.rootVolumeSizeGiB,
+	}
+
+	needsDefaultVPC := options.useDefaultVPC || options.useDefaultSubnet || (options.useDefaultSecurityGroup && len(result.securityGroupIDs) == 0)
+	defaultVPCID := ""
+	if needsDefaultVPC {
+		defaultVPCID, err = resolveDefaultVPCID(ctx, ec2Client, req.Region)
+		if err != nil {
+			return resolvedRunInstancesConfig{}, err
+		}
+	}
+
+	needsIPv6 := options.ipv6AddressCount > 0
+	needsNetworkInterface := options.hasAssociatePublicIPv4 || needsIPv6
+
+	if result.subnetID == "" && (options.useDefaultSubnet || needsNetworkInterface) {
+		if defaultVPCID == "" {
+			defaultVPCID, err = resolveDefaultVPCID(ctx, ec2Client, req.Region)
+			if err != nil {
+				return resolvedRunInstancesConfig{}, err
+			}
+		}
+
+		result.subnetID, err = resolveDefaultSubnetID(ctx, ec2Client, req.Region, defaultVPCID, req.AvailabilityZone, needsIPv6)
+		if err != nil {
+			return resolvedRunInstancesConfig{}, err
+		}
+	}
+
+	if len(result.securityGroupIDs) == 0 && options.useDefaultSecurityGroup {
+		if defaultVPCID == "" {
+			defaultVPCID, err = resolveDefaultVPCID(ctx, ec2Client, req.Region)
+			if err != nil {
+				return resolvedRunInstancesConfig{}, err
+			}
+		}
+
+		defaultSecurityGroupID, err := resolveDefaultSecurityGroupID(ctx, ec2Client, req.Region, defaultVPCID)
+		if err != nil {
+			return resolvedRunInstancesConfig{}, err
+		}
+		result.securityGroupIDs = []string{defaultSecurityGroupID}
+	}
+
+	if needsNetworkInterface {
+		if result.subnetID == "" {
+			return resolvedRunInstancesConfig{}, fmt.Errorf(
+				"start instance options require a subnet; provide subnet_id or enable %s",
+				optionUseDefaultSubnet,
+			)
+		}
+
+		result.useNetworkInterface = true
+		if options.hasAssociatePublicIPv4 {
+			result.associatePublicIPv4 = awsv2.Bool(options.associatePublicIPv4)
+		}
+		result.ipv6AddressCount = options.ipv6AddressCount
+	}
+
+	if options.rootVolumeSizeGiB > 0 {
+		rootDeviceName, err := resolveRootDeviceName(ctx, ec2Client, amiID)
+		if err != nil {
+			return resolvedRunInstancesConfig{}, err
+		}
+		result.rootDeviceName = rootDeviceName
+	}
+
+	return result, nil
+}
+
+func parseStartInstanceLaunchOptions(options map[string]string) (startInstanceLaunchOptions, error) {
+	result := startInstanceLaunchOptions{}
+
+	var err error
+	if result.useDefaultVPC, _, err = parseBoolOption(options, optionUseDefaultVPC); err != nil {
+		return startInstanceLaunchOptions{}, err
+	}
+	if result.useDefaultSubnet, _, err = parseBoolOption(options, optionUseDefaultSubnet); err != nil {
+		return startInstanceLaunchOptions{}, err
+	}
+	if result.useDefaultSecurityGroup, _, err = parseBoolOption(options, optionUseDefaultSecurityGroup); err != nil {
+		return startInstanceLaunchOptions{}, err
+	}
+	if result.associatePublicIPv4, result.hasAssociatePublicIPv4, err = parseBoolOption(options, optionAssociatePublicIPv4); err != nil {
+		return startInstanceLaunchOptions{}, err
+	}
+	if result.assignPublicIPv6, _, err = parseBoolOption(options, optionAssignPublicIPv6); err != nil {
+		return startInstanceLaunchOptions{}, err
+	}
+	if result.ipv6AddressCount, _, err = parsePositiveInt32Option(options, optionIPv6AddressCount); err != nil {
+		return startInstanceLaunchOptions{}, err
+	}
+	if result.rootVolumeSizeGiB, _, err = parsePositiveInt32Option(options, optionRootVolumeSizeGiB); err != nil {
+		return startInstanceLaunchOptions{}, err
+	}
+
+	if result.useDefaultVPC {
+		result.useDefaultSubnet = true
+	}
+	if result.assignPublicIPv6 && result.ipv6AddressCount == 0 {
+		result.ipv6AddressCount = 1
+	}
+
+	return result, nil
+}
+
+func parseBoolOption(options map[string]string, key string) (bool, bool, error) {
+	value, ok := lookupOptionValue(options, key)
+	if !ok {
+		return false, false, nil
+	}
+
+	switch normalizeToken(value) {
+	case "1", "true", "yes", "on":
+		return true, true, nil
+	case "0", "false", "no", "off":
+		return false, true, nil
+	default:
+		return false, true, fmt.Errorf("option %s must be a boolean, got %q", key, value)
+	}
+}
+
+func parsePositiveInt32Option(options map[string]string, key string) (int32, bool, error) {
+	value, ok := lookupOptionValue(options, key)
+	if !ok {
+		return 0, false, nil
+	}
+
+	parsed, err := strconv.Atoi(normalizeToken(value))
+	if err != nil {
+		return 0, true, fmt.Errorf("option %s must be an integer, got %q", key, value)
+	}
+	if parsed <= 0 {
+		return 0, true, fmt.Errorf("option %s must be greater than zero, got %d", key, parsed)
+	}
+
+	return int32(parsed), true, nil
+}
+
+func lookupOptionValue(options map[string]string, target string) (string, bool) {
+	target = normalizeToken(target)
+	for key, value := range options {
+		if normalizeToken(key) == target {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func resolveDefaultVPCID(ctx context.Context, ec2Client ec2API, region string) (string, error) {
+	output, err := ec2Client.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{
+		Filters: []ec2types.Filter{{
+			Name:   awsv2.String("is-default"),
+			Values: []string{"true"},
+		}},
+	})
+	if err != nil {
+		return "", fmt.Errorf("describe default vpc in region %s: %w", region, err)
+	}
+	if len(output.Vpcs) == 0 {
+		return "", fmt.Errorf("no default vpc was found in region %s", region)
+	}
+
+	vpcs := append([]ec2types.Vpc(nil), output.Vpcs...)
+	sort.Slice(vpcs, func(i, j int) bool {
+		return awsv2.ToString(vpcs[i].VpcId) < awsv2.ToString(vpcs[j].VpcId)
+	})
+
+	vpcID := awsv2.ToString(vpcs[0].VpcId)
+	if vpcID == "" {
+		return "", fmt.Errorf("default vpc lookup in region %s returned an empty vpc id", region)
+	}
+
+	return vpcID, nil
+}
+
+func resolveDefaultSubnetID(
+	ctx context.Context,
+	ec2Client ec2API,
+	region string,
+	vpcID string,
+	availabilityZone string,
+	requireIPv6 bool,
+) (string, error) {
+	filters := []ec2types.Filter{
+		{
+			Name:   awsv2.String("default-for-az"),
+			Values: []string{"true"},
+		},
+		{
+			Name:   awsv2.String("vpc-id"),
+			Values: []string{vpcID},
+		},
+	}
+	if availabilityZone != "" {
+		filters = append(filters, ec2types.Filter{
+			Name:   awsv2.String("availability-zone"),
+			Values: []string{availabilityZone},
+		})
+	}
+
+	output, err := ec2Client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{Filters: filters})
+	if err != nil {
+		return "", fmt.Errorf("describe default subnets in region %s: %w", region, err)
+	}
+	if len(output.Subnets) == 0 {
+		if availabilityZone != "" {
+			return "", fmt.Errorf("no default subnet was found in region %s for availability zone %s", region, availabilityZone)
+		}
+		return "", fmt.Errorf("no default subnet was found in region %s", region)
+	}
+
+	subnets := append([]ec2types.Subnet(nil), output.Subnets...)
+	sort.Slice(subnets, func(i, j int) bool {
+		leftAZ := awsv2.ToString(subnets[i].AvailabilityZone)
+		rightAZ := awsv2.ToString(subnets[j].AvailabilityZone)
+		if leftAZ != rightAZ {
+			return leftAZ < rightAZ
+		}
+		return awsv2.ToString(subnets[i].SubnetId) < awsv2.ToString(subnets[j].SubnetId)
+	})
+
+	for _, subnet := range subnets {
+		if requireIPv6 && !subnetSupportsIPv6(subnet) {
+			continue
+		}
+
+		subnetID := awsv2.ToString(subnet.SubnetId)
+		if subnetID == "" {
+			continue
+		}
+		return subnetID, nil
+	}
+
+	if availabilityZone != "" && requireIPv6 {
+		return "", fmt.Errorf("no default subnet with IPv6 support was found in region %s for availability zone %s", region, availabilityZone)
+	}
+	if requireIPv6 {
+		return "", fmt.Errorf("no default subnet with IPv6 support was found in region %s", region)
+	}
+
+	return "", fmt.Errorf("default subnet lookup in region %s returned only subnets without ids", region)
+}
+
+func resolveDefaultSecurityGroupID(ctx context.Context, ec2Client ec2API, region string, vpcID string) (string, error) {
+	output, err := ec2Client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
+		Filters: []ec2types.Filter{
+			{
+				Name:   awsv2.String("vpc-id"),
+				Values: []string{vpcID},
+			},
+			{
+				Name:   awsv2.String("group-name"),
+				Values: []string{"default"},
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("describe default security group in region %s: %w", region, err)
+	}
+	if len(output.SecurityGroups) == 0 {
+		return "", fmt.Errorf("no default security group was found in region %s for vpc %s", region, vpcID)
+	}
+
+	securityGroups := append([]ec2types.SecurityGroup(nil), output.SecurityGroups...)
+	sort.Slice(securityGroups, func(i, j int) bool {
+		return awsv2.ToString(securityGroups[i].GroupId) < awsv2.ToString(securityGroups[j].GroupId)
+	})
+
+	groupID := awsv2.ToString(securityGroups[0].GroupId)
+	if groupID == "" {
+		return "", fmt.Errorf("default security group lookup in region %s returned an empty group id", region)
+	}
+
+	return groupID, nil
+}
+
+func resolveRootDeviceName(ctx context.Context, ec2Client ec2API, amiID string) (string, error) {
+	output, err := ec2Client.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		ImageIds: []string{amiID},
+	})
+	if err != nil {
+		return "", fmt.Errorf("describe image %s for root device lookup: %w", amiID, err)
+	}
+	if len(output.Images) == 0 {
+		return "", fmt.Errorf("describe image %s returned no images", amiID)
+	}
+
+	image := output.Images[0]
+	if rootDeviceName := awsv2.ToString(image.RootDeviceName); rootDeviceName != "" {
+		return rootDeviceName, nil
+	}
+
+	for _, mapping := range image.BlockDeviceMappings {
+		if deviceName := awsv2.ToString(mapping.DeviceName); deviceName != "" {
+			return deviceName, nil
+		}
+	}
+
+	return "", fmt.Errorf("image %s did not report a root device name", amiID)
+}
+
+func subnetSupportsIPv6(subnet ec2types.Subnet) bool {
+	for _, association := range subnet.Ipv6CidrBlockAssociationSet {
+		state := normalizeToken(string(association.Ipv6CidrBlockState.State))
+		if state == "" || state == "associated" {
+			return true
+		}
+	}
+
+	return false
+}

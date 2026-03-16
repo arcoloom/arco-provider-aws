@@ -37,7 +37,7 @@ func (s *Service) Metadata(context.Context) (provider.Metadata, error) {
 		Version:           s.version,
 		Cloud:             provider.CloudAWS,
 		SupportedAuth:     []provider.AuthScheme{provider.AuthSchemeAWSIAM},
-		SupportedServices: []string{"spot", "compute", "catalog", "pricing"},
+		SupportedServices: []string{"location", "spot", "compute", "catalog", "pricing"},
 		Capabilities: map[string]string{
 			"transport":  "grpc",
 			"runtime":    "provider",

@@ -1,5 +1,3 @@
-//go:build !pulumi
-
 package aws
 
 import (
@@ -8,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
@@ -15,13 +14,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 )
 
 const (
 	managedByTagValue          = "arcoloom"
 	stackTagKey                = "ArcoloomStack"
-	defaultAMIParamX8664       = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-	defaultAMIParamArm64       = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+	debian13AMIPathRoot        = "/aws/service/debian/release/13/latest"
 	dryRunOptionKey            = "dry_run"
 	dryRunInstanceIDPrefix     = "dry-run-"
 	warningCodeDryRun          = "DRY_RUN"
@@ -61,7 +60,12 @@ func (r ec2InstanceLifecycleRunner) Start(ctx context.Context, req provider.Star
 		return provider.StartInstanceResult{}, err
 	}
 
-	input := buildRunInstancesInput(req, amiID)
+	runConfig, err := resolveRunInstancesConfig(ctx, ec2Client, req, amiID)
+	if err != nil {
+		return provider.StartInstanceResult{}, err
+	}
+
+	input := buildRunInstancesInput(req, amiID, runConfig)
 	output, err := ec2Client.RunInstances(ctx, input)
 	if err != nil {
 		return provider.StartInstanceResult{}, fmt.Errorf("run instances for stack %s in region %s: %w", req.StackName, cfg.Region, err)
@@ -146,32 +150,20 @@ func resolveAMI(ctx context.Context, ec2Client ec2API, ssmClient ssmAPI, req pro
 		return strings.TrimSpace(req.AMI), nil
 	}
 
-	parameterName, err := defaultAMIParameter(ctx, ec2Client, req.InstanceType)
+	architecture, err := defaultAMIArchitecture(ctx, ec2Client, req.InstanceType)
 	if err != nil {
 		return "", err
 	}
 
-	output, err := ssmClient.GetParameter(ctx, &ssm.GetParameterInput{
-		Name: awsv2.String(parameterName),
-	})
-	if err != nil {
-		return "", fmt.Errorf("resolve default ami from %s: %w", parameterName, err)
-	}
-
-	amiID := strings.TrimSpace(awsv2.ToString(output.Parameter.Value))
-	if amiID == "" {
-		return "", fmt.Errorf("ssm parameter %s returned an empty ami id", parameterName)
-	}
-
-	return amiID, nil
+	return resolveDebian13AMI(ctx, ssmClient, architecture)
 }
 
-func defaultAMIParameter(ctx context.Context, ec2Client ec2API, instanceType string) (string, error) {
+func defaultAMIArchitecture(ctx context.Context, ec2Client ec2API, instanceType string) (string, error) {
 	output, err := ec2Client.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{
 		InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(instanceType)},
 	})
 	if err != nil {
-		return "", fmt.Errorf("describe instance type %s: %w", instanceType, err)
+		return "", fmt.Errorf("describe instance type %s for default debian 13 ami selection: %w", instanceType, err)
 	}
 	if len(output.InstanceTypes) == 0 {
 		return "", fmt.Errorf("instance type %s was not found", instanceType)
@@ -180,16 +172,131 @@ func defaultAMIParameter(ctx context.Context, ec2Client ec2API, instanceType str
 	for _, arch := range output.InstanceTypes[0].ProcessorInfo.SupportedArchitectures {
 		switch arch {
 		case ec2types.ArchitectureTypeArm64:
-			return defaultAMIParamArm64, nil
+			return "arm64", nil
 		case ec2types.ArchitectureTypeX8664:
-			return defaultAMIParamX8664, nil
+			return "amd64", nil
 		}
 	}
 
-	return "", fmt.Errorf("instance type %s does not report a supported default architecture", instanceType)
+	return "", fmt.Errorf("instance type %s does not report a supported debian 13 architecture", instanceType)
 }
 
-func buildRunInstancesInput(req provider.StartInstanceRequest, amiID string) *ec2.RunInstancesInput {
+func resolveDebian13AMI(ctx context.Context, ssmClient ssmAPI, architecture string) (string, error) {
+	var (
+		nextToken  *string
+		candidates []ssmtypes.Parameter
+	)
+
+	for {
+		output, err := ssmClient.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
+			Path:           awsv2.String(debian13AMIPathRoot),
+			Recursive:      awsv2.Bool(true),
+			WithDecryption: awsv2.Bool(false),
+			NextToken:      nextToken,
+		})
+		if err != nil {
+			return "", fmt.Errorf("resolve default debian 13 ami from %s: %w", debian13AMIPathRoot, err)
+		}
+
+		candidates = append(candidates, output.Parameters...)
+		if strings.TrimSpace(awsv2.ToString(output.NextToken)) == "" {
+			break
+		}
+		nextToken = output.NextToken
+	}
+
+	amiID, parameterName := pickDebian13AMI(candidates, architecture)
+	if amiID == "" {
+		return "", fmt.Errorf("no debian 13 ami parameter under %s matched architecture %s", debian13AMIPathRoot, architecture)
+	}
+	if parameterName == "" {
+		return "", fmt.Errorf("debian 13 ami resolution for architecture %s returned an unnamed parameter", architecture)
+	}
+
+	return amiID, nil
+}
+
+func pickDebian13AMI(parameters []ssmtypes.Parameter, architecture string) (string, string) {
+	bestScore := -1
+	bestVersion := -1
+	bestName := ""
+	bestValue := ""
+
+	for _, parameter := range parameters {
+		name := strings.TrimSpace(awsv2.ToString(parameter.Name))
+		value := strings.TrimSpace(awsv2.ToString(parameter.Value))
+		if name == "" || value == "" || !strings.HasPrefix(value, "ami-") {
+			continue
+		}
+
+		score := debian13AMIScore(name, architecture)
+		if score < 0 {
+			continue
+		}
+
+		version := parameterVersion(name)
+		if score > bestScore || (score == bestScore && version > bestVersion) || (score == bestScore && version == bestVersion && name > bestName) {
+			bestScore = score
+			bestVersion = version
+			bestName = name
+			bestValue = value
+		}
+	}
+
+	return bestValue, bestName
+}
+
+func debian13AMIScore(name string, architecture string) int {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if !strings.HasPrefix(normalized, debian13AMIPathRoot) {
+		return -1
+	}
+
+	score := 0
+	switch architecture {
+	case "amd64":
+		if strings.Contains(normalized, "/amd64") {
+			score += 100
+		}
+		if strings.Contains(normalized, "/x86_64") {
+			score += 80
+		}
+	case "arm64":
+		if strings.Contains(normalized, "/arm64") {
+			score += 100
+		}
+		if strings.Contains(normalized, "/aarch64") {
+			score += 80
+		}
+	}
+
+	if strings.Contains(normalized, "/ami-id") || strings.HasSuffix(normalized, "/id") {
+		score += 20
+	}
+	if strings.Contains(normalized, "/current") || strings.Contains(normalized, "/latest") {
+		score += 10
+	}
+	if score == 0 {
+		return -1
+	}
+
+	return score
+}
+
+func parameterVersion(name string) int {
+	if idx := strings.LastIndex(name, ":"); idx >= 0 && idx+1 < len(name) {
+		if version, err := strconv.Atoi(name[idx+1:]); err == nil {
+			return version
+		}
+	}
+	return 0
+}
+
+func buildRunInstancesInput(
+	req provider.StartInstanceRequest,
+	amiID string,
+	runConfig resolvedRunInstancesConfig,
+) *ec2.RunInstancesInput {
 	input := &ec2.RunInstancesInput{
 		ImageId:      awsv2.String(amiID),
 		InstanceType: ec2types.InstanceType(req.InstanceType),
@@ -206,11 +313,39 @@ func buildRunInstancesInput(req provider.StartInstanceRequest, amiID string) *ec
 	if req.AvailabilityZone != "" {
 		input.Placement = &ec2types.Placement{AvailabilityZone: awsv2.String(req.AvailabilityZone)}
 	}
-	if req.SubnetID != "" {
-		input.SubnetId = awsv2.String(req.SubnetID)
+	if runConfig.useNetworkInterface {
+		networkInterface := ec2types.InstanceNetworkInterfaceSpecification{
+			DeviceIndex:         awsv2.Int32(0),
+			DeleteOnTermination: awsv2.Bool(true),
+			SubnetId:            awsv2.String(runConfig.subnetID),
+		}
+		if runConfig.associatePublicIPv4 != nil {
+			networkInterface.AssociatePublicIpAddress = runConfig.associatePublicIPv4
+		}
+		if runConfig.ipv6AddressCount > 0 {
+			networkInterface.Ipv6AddressCount = awsv2.Int32(runConfig.ipv6AddressCount)
+		}
+		if len(runConfig.securityGroupIDs) > 0 {
+			networkInterface.Groups = append([]string(nil), runConfig.securityGroupIDs...)
+		}
+		input.NetworkInterfaces = []ec2types.InstanceNetworkInterfaceSpecification{networkInterface}
+	} else {
+		if runConfig.subnetID != "" {
+			input.SubnetId = awsv2.String(runConfig.subnetID)
+		}
+		if len(runConfig.securityGroupIDs) > 0 {
+			input.SecurityGroupIds = append([]string(nil), runConfig.securityGroupIDs...)
+		}
 	}
-	if len(req.SecurityGroupIDs) > 0 {
-		input.SecurityGroupIds = append([]string(nil), req.SecurityGroupIDs...)
+	if runConfig.rootVolumeSizeGiB > 0 {
+		input.BlockDeviceMappings = []ec2types.BlockDeviceMapping{{
+			DeviceName: awsv2.String(runConfig.rootDeviceName),
+			Ebs: &ec2types.EbsBlockDevice{
+				DeleteOnTermination: awsv2.Bool(true),
+				VolumeSize:          awsv2.Int32(runConfig.rootVolumeSizeGiB),
+				VolumeType:          ec2types.VolumeTypeGp3,
+			},
+		}}
 	}
 	if req.KeyName != "" {
 		input.KeyName = awsv2.String(req.KeyName)

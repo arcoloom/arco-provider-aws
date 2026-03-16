@@ -4,24 +4,22 @@ This is the AWS provider used by Arcoloom.
 
 The provider now exposes `StartInstance` and `StopInstance` RPCs for EC2 lifecycle management.
 
-- `StartInstance` provisions an EC2 instance through Pulumi Automation API and accepts parameters such as `instance_type`, `market_type` (`on-demand` or `spot`), `ami`, subnet, security groups, key pair, user data, and tags.
-- `StopInstance` tears down the Pulumi stack for the managed instance.
-
-The concrete Pulumi-backed runner lives behind the `pulumi` build tag so the repository can still build before Pulumi dependencies are installed locally.
-
-Example:
-
-```bash
-go build -tags pulumi ./cmd/arco-provider-aws
-```
+- `StartInstance` provisions an EC2 instance directly through the AWS SDK and accepts parameters such as `instance_type`, `market_type` (`on-demand` or `spot`), `ami`, subnet, security groups, key pair, user data, and tags.
+- If `ami` is omitted, the provider resolves the latest Debian 13 AMI from Debian's public SSM parameters based on the instance architecture.
+- `StartInstance` requires an explicit `region`; it no longer falls back to `scope.region` or `us-east-1`.
+- `StopInstance` finds EC2 instances tagged with the request `stack_name` and terminates them through the AWS SDK.
 
 ## Catalog and pricing
 
 The provider now exposes standardized instance catalog and pricing APIs:
 
+- `ListRegions`
+- `ListAvailabilityZones`
 - `ListInstanceTypes`
 - `GetInstanceTypeInfo`
 - `GetInstancePrices`
+
+`ListRegions` and `ListAvailabilityZones` use live EC2 account metadata to discover which regions and availability zones are currently enabled for the caller.
 
 AWS instance metadata is sourced from Arcoloom catalog data and cached on disk under `~/.arcoloom/instances/aws`.
 

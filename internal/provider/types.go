@@ -92,6 +92,45 @@ type PingResult struct {
 	Timestamp time.Time
 }
 
+type ListRegionsRequest struct {
+	Context     RequestContext
+	Credentials Credentials
+	Scope       ConnectionScope
+	Options     map[string]string
+}
+
+type ListRegionsResult struct {
+	Items    []Region
+	Warnings []Warning
+}
+
+type AvailabilityZone struct {
+	Name               string
+	ZoneID             string
+	Region             string
+	State              string
+	ZoneType           string
+	GroupName          string
+	NetworkBorderGroup string
+	ParentZoneID       string
+	ParentZoneName     string
+	OptInStatus        string
+}
+
+type ListAvailabilityZonesRequest struct {
+	Context           RequestContext
+	Credentials       Credentials
+	Scope             ConnectionScope
+	Region            string
+	AvailabilityZones []string
+	Options           map[string]string
+}
+
+type ListAvailabilityZonesResult struct {
+	Items    []AvailabilityZone
+	Warnings []Warning
+}
+
 type GetSpotDataRequest struct {
 	Context           RequestContext
 	Credentials       Credentials
@@ -177,6 +216,39 @@ type StopInstanceResult struct {
 	StackName string
 	Destroyed bool
 	Warnings  []Warning
+}
+
+type ListActiveInstancesRequest struct {
+	Context           RequestContext
+	Credentials       Credentials
+	Scope             ConnectionScope
+	Regions           []string
+	AvailabilityZones []string
+	InstanceTypes     []string
+	Tags              []InstanceTag
+	Options           map[string]string
+}
+
+type ActiveInstance struct {
+	InstanceID       string
+	Name             string
+	Region           string
+	AvailabilityZone string
+	InstanceType     string
+	State            string
+	MarketType       InstanceMarketType
+	PublicIP         string
+	PrivateIP        string
+	IPv6Addresses    []string
+	SubnetID         string
+	VPCID            string
+	LaunchTime       time.Time
+	Tags             []InstanceTag
+}
+
+type ListActiveInstancesResult struct {
+	Items    []ActiveInstance
+	Warnings []Warning
 }
 
 type PurchaseOption string

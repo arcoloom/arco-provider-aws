@@ -19,15 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ProviderService_GetProviderInfo_FullMethodName     = "/arco.provider.v1.ProviderService/GetProviderInfo"
-	ProviderService_ValidateConnection_FullMethodName  = "/arco.provider.v1.ProviderService/ValidateConnection"
-	ProviderService_Ping_FullMethodName                = "/arco.provider.v1.ProviderService/Ping"
-	ProviderService_GetSpotData_FullMethodName         = "/arco.provider.v1.ProviderService/GetSpotData"
-	ProviderService_StartInstance_FullMethodName       = "/arco.provider.v1.ProviderService/StartInstance"
-	ProviderService_StopInstance_FullMethodName        = "/arco.provider.v1.ProviderService/StopInstance"
-	ProviderService_ListInstanceTypes_FullMethodName   = "/arco.provider.v1.ProviderService/ListInstanceTypes"
-	ProviderService_GetInstanceTypeInfo_FullMethodName = "/arco.provider.v1.ProviderService/GetInstanceTypeInfo"
-	ProviderService_GetInstancePrices_FullMethodName   = "/arco.provider.v1.ProviderService/GetInstancePrices"
+	ProviderService_GetProviderInfo_FullMethodName       = "/arco.provider.v1.ProviderService/GetProviderInfo"
+	ProviderService_ValidateConnection_FullMethodName    = "/arco.provider.v1.ProviderService/ValidateConnection"
+	ProviderService_Ping_FullMethodName                  = "/arco.provider.v1.ProviderService/Ping"
+	ProviderService_ListRegions_FullMethodName           = "/arco.provider.v1.ProviderService/ListRegions"
+	ProviderService_ListAvailabilityZones_FullMethodName = "/arco.provider.v1.ProviderService/ListAvailabilityZones"
+	ProviderService_GetSpotData_FullMethodName           = "/arco.provider.v1.ProviderService/GetSpotData"
+	ProviderService_StartInstance_FullMethodName         = "/arco.provider.v1.ProviderService/StartInstance"
+	ProviderService_StopInstance_FullMethodName          = "/arco.provider.v1.ProviderService/StopInstance"
+	ProviderService_ListActiveInstances_FullMethodName   = "/arco.provider.v1.ProviderService/ListActiveInstances"
+	ProviderService_ListInstanceTypes_FullMethodName     = "/arco.provider.v1.ProviderService/ListInstanceTypes"
+	ProviderService_GetInstanceTypeInfo_FullMethodName   = "/arco.provider.v1.ProviderService/GetInstanceTypeInfo"
+	ProviderService_GetInstancePrices_FullMethodName     = "/arco.provider.v1.ProviderService/GetInstancePrices"
 )
 
 // ProviderServiceClient is the client API for ProviderService service.
@@ -37,9 +40,12 @@ type ProviderServiceClient interface {
 	GetProviderInfo(ctx context.Context, in *GetProviderInfoRequest, opts ...grpc.CallOption) (*GetProviderInfoResponse, error)
 	ValidateConnection(ctx context.Context, in *ValidateConnectionRequest, opts ...grpc.CallOption) (*ValidateConnectionResponse, error)
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
+	ListRegions(ctx context.Context, in *ListRegionsRequest, opts ...grpc.CallOption) (*ListRegionsResponse, error)
+	ListAvailabilityZones(ctx context.Context, in *ListAvailabilityZonesRequest, opts ...grpc.CallOption) (*ListAvailabilityZonesResponse, error)
 	GetSpotData(ctx context.Context, in *GetSpotDataRequest, opts ...grpc.CallOption) (*GetSpotDataResponse, error)
 	StartInstance(ctx context.Context, in *StartInstanceRequest, opts ...grpc.CallOption) (*StartInstanceResponse, error)
 	StopInstance(ctx context.Context, in *StopInstanceRequest, opts ...grpc.CallOption) (*StopInstanceResponse, error)
+	ListActiveInstances(ctx context.Context, in *ListActiveInstancesRequest, opts ...grpc.CallOption) (*ListActiveInstancesResponse, error)
 	ListInstanceTypes(ctx context.Context, in *ListInstanceTypesRequest, opts ...grpc.CallOption) (*ListInstanceTypesResponse, error)
 	GetInstanceTypeInfo(ctx context.Context, in *GetInstanceTypeInfoRequest, opts ...grpc.CallOption) (*GetInstanceTypeInfoResponse, error)
 	GetInstancePrices(ctx context.Context, in *GetInstancePricesRequest, opts ...grpc.CallOption) (*GetInstancePricesResponse, error)
@@ -83,6 +89,26 @@ func (c *providerServiceClient) Ping(ctx context.Context, in *PingRequest, opts 
 	return out, nil
 }
 
+func (c *providerServiceClient) ListRegions(ctx context.Context, in *ListRegionsRequest, opts ...grpc.CallOption) (*ListRegionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRegionsResponse)
+	err := c.cc.Invoke(ctx, ProviderService_ListRegions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *providerServiceClient) ListAvailabilityZones(ctx context.Context, in *ListAvailabilityZonesRequest, opts ...grpc.CallOption) (*ListAvailabilityZonesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAvailabilityZonesResponse)
+	err := c.cc.Invoke(ctx, ProviderService_ListAvailabilityZones_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *providerServiceClient) GetSpotData(ctx context.Context, in *GetSpotDataRequest, opts ...grpc.CallOption) (*GetSpotDataResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetSpotDataResponse)
@@ -107,6 +133,16 @@ func (c *providerServiceClient) StopInstance(ctx context.Context, in *StopInstan
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StopInstanceResponse)
 	err := c.cc.Invoke(ctx, ProviderService_StopInstance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *providerServiceClient) ListActiveInstances(ctx context.Context, in *ListActiveInstancesRequest, opts ...grpc.CallOption) (*ListActiveInstancesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListActiveInstancesResponse)
+	err := c.cc.Invoke(ctx, ProviderService_ListActiveInstances_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -150,9 +186,12 @@ type ProviderServiceServer interface {
 	GetProviderInfo(context.Context, *GetProviderInfoRequest) (*GetProviderInfoResponse, error)
 	ValidateConnection(context.Context, *ValidateConnectionRequest) (*ValidateConnectionResponse, error)
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
+	ListRegions(context.Context, *ListRegionsRequest) (*ListRegionsResponse, error)
+	ListAvailabilityZones(context.Context, *ListAvailabilityZonesRequest) (*ListAvailabilityZonesResponse, error)
 	GetSpotData(context.Context, *GetSpotDataRequest) (*GetSpotDataResponse, error)
 	StartInstance(context.Context, *StartInstanceRequest) (*StartInstanceResponse, error)
 	StopInstance(context.Context, *StopInstanceRequest) (*StopInstanceResponse, error)
+	ListActiveInstances(context.Context, *ListActiveInstancesRequest) (*ListActiveInstancesResponse, error)
 	ListInstanceTypes(context.Context, *ListInstanceTypesRequest) (*ListInstanceTypesResponse, error)
 	GetInstanceTypeInfo(context.Context, *GetInstanceTypeInfoRequest) (*GetInstanceTypeInfoResponse, error)
 	GetInstancePrices(context.Context, *GetInstancePricesRequest) (*GetInstancePricesResponse, error)
@@ -174,6 +213,12 @@ func (UnimplementedProviderServiceServer) ValidateConnection(context.Context, *V
 func (UnimplementedProviderServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
+func (UnimplementedProviderServiceServer) ListRegions(context.Context, *ListRegionsRequest) (*ListRegionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRegions not implemented")
+}
+func (UnimplementedProviderServiceServer) ListAvailabilityZones(context.Context, *ListAvailabilityZonesRequest) (*ListAvailabilityZonesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAvailabilityZones not implemented")
+}
 func (UnimplementedProviderServiceServer) GetSpotData(context.Context, *GetSpotDataRequest) (*GetSpotDataResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSpotData not implemented")
 }
@@ -182,6 +227,9 @@ func (UnimplementedProviderServiceServer) StartInstance(context.Context, *StartI
 }
 func (UnimplementedProviderServiceServer) StopInstance(context.Context, *StopInstanceRequest) (*StopInstanceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StopInstance not implemented")
+}
+func (UnimplementedProviderServiceServer) ListActiveInstances(context.Context, *ListActiveInstancesRequest) (*ListActiveInstancesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListActiveInstances not implemented")
 }
 func (UnimplementedProviderServiceServer) ListInstanceTypes(context.Context, *ListInstanceTypesRequest) (*ListInstanceTypesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListInstanceTypes not implemented")
@@ -266,6 +314,42 @@ func _ProviderService_Ping_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ProviderService_ListRegions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRegionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProviderServiceServer).ListRegions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProviderService_ListRegions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProviderServiceServer).ListRegions(ctx, req.(*ListRegionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProviderService_ListAvailabilityZones_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAvailabilityZonesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProviderServiceServer).ListAvailabilityZones(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProviderService_ListAvailabilityZones_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProviderServiceServer).ListAvailabilityZones(ctx, req.(*ListAvailabilityZonesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ProviderService_GetSpotData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetSpotDataRequest)
 	if err := dec(in); err != nil {
@@ -316,6 +400,24 @@ func _ProviderService_StopInstance_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProviderServiceServer).StopInstance(ctx, req.(*StopInstanceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProviderService_ListActiveInstances_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListActiveInstancesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProviderServiceServer).ListActiveInstances(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProviderService_ListActiveInstances_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProviderServiceServer).ListActiveInstances(ctx, req.(*ListActiveInstancesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -394,6 +496,14 @@ var ProviderService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ProviderService_Ping_Handler,
 		},
 		{
+			MethodName: "ListRegions",
+			Handler:    _ProviderService_ListRegions_Handler,
+		},
+		{
+			MethodName: "ListAvailabilityZones",
+			Handler:    _ProviderService_ListAvailabilityZones_Handler,
+		},
+		{
 			MethodName: "GetSpotData",
 			Handler:    _ProviderService_GetSpotData_Handler,
 		},
@@ -404,6 +514,10 @@ var ProviderService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StopInstance",
 			Handler:    _ProviderService_StopInstance_Handler,
+		},
+		{
+			MethodName: "ListActiveInstances",
+			Handler:    _ProviderService_ListActiveInstances_Handler,
 		},
 		{
 			MethodName: "ListInstanceTypes",
