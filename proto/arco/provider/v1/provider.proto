@@ -1,0 +1,340 @@
+syntax = "proto3";
+
+package arco.provider.v1;
+
+option go_package = "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1;providerv1";
+
+service ProviderService {
+  rpc GetProviderInfo(GetProviderInfoRequest) returns (GetProviderInfoResponse);
+  rpc ValidateConnection(ValidateConnectionRequest) returns (ValidateConnectionResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc GetSpotData(GetSpotDataRequest) returns (GetSpotDataResponse);
+  rpc StartInstance(StartInstanceRequest) returns (StartInstanceResponse);
+  rpc StopInstance(StopInstanceRequest) returns (StopInstanceResponse);
+  rpc ListInstanceTypes(ListInstanceTypesRequest) returns (ListInstanceTypesResponse);
+  rpc GetInstanceTypeInfo(GetInstanceTypeInfoRequest) returns (GetInstanceTypeInfoResponse);
+  rpc GetInstancePrices(GetInstancePricesRequest) returns (GetInstancePricesResponse);
+}
+
+enum Cloud {
+  CLOUD_UNSPECIFIED = 0;
+  CLOUD_AWS = 1;
+  CLOUD_AZURE = 2;
+  CLOUD_GCP = 3;
+}
+
+enum AuthScheme {
+  AUTH_SCHEME_UNSPECIFIED = 0;
+  AUTH_SCHEME_AWS_IAM = 1;
+  AUTH_SCHEME_AZURE_CLIENT_SECRET = 2;
+  AUTH_SCHEME_GCP_SERVICE_ACCOUNT = 3;
+}
+
+message RequestContext {
+  string request_id = 1;
+  string caller = 2;
+  string trace_id = 3;
+}
+
+message ConnectionScope {
+  string account_id = 1;
+  string region = 2;
+  string endpoint = 3;
+  map<string, string> attributes = 4;
+  string endpoint_region = 5;
+}
+
+message AwsIamCredentials {
+  string access_key_id = 1;
+  string secret_access_key = 2;
+  string session_token = 3;
+  string role_arn = 4;
+  string external_id = 5;
+}
+
+message AzureClientSecretCredentials {
+  string tenant_id = 1;
+  string client_id = 2;
+  string client_secret = 3;
+  string subscription_id = 4;
+}
+
+message GcpServiceAccountCredentials {
+  string project_id = 1;
+  string client_email = 2;
+  string private_key = 3;
+  string private_key_id = 4;
+}
+
+message Credentials {
+  oneof auth {
+    AwsIamCredentials aws_iam = 1;
+    AzureClientSecretCredentials azure_client_secret = 2;
+    GcpServiceAccountCredentials gcp_service_account = 3;
+  }
+}
+
+message ProviderMetadata {
+  string name = 1;
+  string version = 2;
+  Cloud cloud = 3;
+  repeated AuthScheme supported_auth_schemes = 4;
+  repeated string supported_services = 5;
+  map<string, string> capabilities = 6;
+}
+
+message Warning {
+  string code = 1;
+  string message = 2;
+}
+
+message GetProviderInfoRequest {}
+
+message GetProviderInfoResponse {
+  ProviderMetadata metadata = 1;
+}
+
+message ValidateConnectionRequest {
+  RequestContext context = 1;
+  Credentials credentials = 2;
+  ConnectionScope scope = 3;
+  map<string, string> options = 4;
+}
+
+message ValidateConnectionResponse {
+  bool accepted = 1;
+  string message = 2;
+  repeated Warning warnings = 3;
+}
+
+message PingRequest {
+  RequestContext context = 1;
+  string payload = 2;
+}
+
+message PingResponse {
+  string payload = 1;
+  string timestamp = 2;
+  ProviderMetadata metadata = 3;
+}
+
+message GetSpotDataRequest {
+  RequestContext context = 1;
+  Credentials credentials = 2;
+  ConnectionScope scope = 3;
+  repeated string instance_types = 4;
+  string region = 5;
+  repeated string availability_zones = 6;
+  map<string, string> options = 7;
+}
+
+message SpotInventory {
+  bool offered = 1;
+  string status = 2;
+  bool has_capacity_score = 3;
+  int32 capacity_score = 4;
+}
+
+message SpotData {
+  string instance_type = 1;
+  string region = 2;
+  string availability_zone = 3;
+  bool has_price = 4;
+  string price = 5;
+  string currency = 6;
+  string timestamp = 7;
+  SpotInventory inventory = 8;
+}
+
+message GetSpotDataResponse {
+  repeated SpotData items = 1;
+  repeated Warning warnings = 2;
+}
+
+enum InstanceMarketType {
+  INSTANCE_MARKET_TYPE_UNSPECIFIED = 0;
+  INSTANCE_MARKET_TYPE_ON_DEMAND = 1;
+  INSTANCE_MARKET_TYPE_SPOT = 2;
+}
+
+message InstanceTag {
+  string key = 1;
+  string value = 2;
+}
+
+message StartInstanceRequest {
+  RequestContext context = 1;
+  Credentials credentials = 2;
+  ConnectionScope scope = 3;
+  string stack_name = 4;
+  string instance_name = 5;
+  string region = 6;
+  string availability_zone = 7;
+  string ami = 8;
+  string instance_type = 9;
+  InstanceMarketType market_type = 10;
+  string subnet_id = 11;
+  repeated string security_group_ids = 12;
+  string key_name = 13;
+  string user_data = 14;
+  map<string, string> options = 15;
+  repeated InstanceTag tags = 16;
+}
+
+message StartInstanceResponse {
+  string stack_name = 1;
+  string instance_id = 2;
+  string urn = 3;
+  string public_ip = 4;
+  string private_ip = 5;
+  repeated Warning warnings = 6;
+}
+
+message StopInstanceRequest {
+  RequestContext context = 1;
+  Credentials credentials = 2;
+  ConnectionScope scope = 3;
+  string stack_name = 4;
+  map<string, string> options = 5;
+}
+
+message StopInstanceResponse {
+  string stack_name = 1;
+  bool destroyed = 2;
+  repeated Warning warnings = 3;
+}
+
+enum PurchaseOption {
+  PURCHASE_OPTION_UNSPECIFIED = 0;
+  PURCHASE_OPTION_ON_DEMAND = 1;
+  PURCHASE_OPTION_SPOT = 2;
+}
+
+enum AcceleratorKind {
+  ACCELERATOR_KIND_UNSPECIFIED = 0;
+  ACCELERATOR_KIND_GPU = 1;
+  ACCELERATOR_KIND_FPGA = 2;
+}
+
+message CloudRegion {
+  string code = 1;
+  string name = 2;
+}
+
+message Accelerator {
+  AcceleratorKind kind = 1;
+  string model = 2;
+  double count = 3;
+  double memory_gib = 4;
+}
+
+message LocalStorage {
+  bool has_local_storage = 1;
+  string medium = 2;
+  int32 disk_count = 3;
+  double total_size_gib = 4;
+}
+
+message InstanceTypeSummary {
+  string instance_type = 1;
+  string series = 2;
+  string family = 3;
+  string category = 4;
+  string display_name = 5;
+  string generation = 6;
+  int32 vcpu = 7;
+  double memory_gib = 8;
+  repeated string architectures = 9;
+  int32 supported_region_count = 10;
+}
+
+message InstanceTypeInfo {
+  string instance_type = 1;
+  string series = 2;
+  string family = 3;
+  string category = 4;
+  string display_name = 5;
+  string generation = 6;
+  int32 vcpu = 7;
+  double memory_gib = 8;
+  repeated string architectures = 9;
+  string cpu_manufacturer = 10;
+  string cpu_model = 11;
+  string cpu_clock_speed_ghz = 12;
+  string network_performance = 13;
+  bool enhanced_networking = 14;
+  bool ipv6_supported = 15;
+  bool placement_group_supported = 16;
+  bool vpc_only = 17;
+  bool ebs_optimized = 18;
+  repeated CloudRegion supported_regions = 19;
+  repeated string supported_operating_systems = 20;
+  repeated Accelerator accelerators = 21;
+  LocalStorage local_storage = 22;
+  map<string, string> attributes = 23;
+}
+
+message InstancePrice {
+  string instance_type = 1;
+  CloudRegion region = 2;
+  PurchaseOption purchase_option = 3;
+  string operating_system = 4;
+  string tenancy = 5;
+  string preinstalled_software = 6;
+  string license_model = 7;
+  string billing_unit = 8;
+  string currency = 9;
+  string price = 10;
+  string effective_at = 11;
+  string sku = 12;
+  string description = 13;
+}
+
+message ListInstanceTypesRequest {
+  RequestContext context = 1;
+  ConnectionScope scope = 2;
+  string region = 3;
+  repeated string series = 4;
+  repeated string instance_types = 5;
+  repeated string architectures = 6;
+  string generation = 7;
+  map<string, string> options = 8;
+}
+
+message ListInstanceTypesResponse {
+  repeated InstanceTypeSummary items = 1;
+  repeated Warning warnings = 2;
+}
+
+message GetInstanceTypeInfoRequest {
+  RequestContext context = 1;
+  ConnectionScope scope = 2;
+  string region = 3;
+  repeated string series = 4;
+  repeated string instance_types = 5;
+  map<string, string> options = 6;
+}
+
+message GetInstanceTypeInfoResponse {
+  repeated InstanceTypeInfo items = 1;
+  repeated Warning warnings = 2;
+}
+
+message GetInstancePricesRequest {
+  RequestContext context = 1;
+  ConnectionScope scope = 2;
+  string region = 3;
+  repeated string instance_types = 4;
+  PurchaseOption purchase_option = 5;
+  string operating_system = 6;
+  string tenancy = 7;
+  string preinstalled_software = 8;
+  string license_model = 9;
+  string currency = 10;
+  map<string, string> options = 11;
+}
+
+message GetInstancePricesResponse {
+  repeated InstancePrice items = 1;
+  repeated Warning warnings = 2;
+}
