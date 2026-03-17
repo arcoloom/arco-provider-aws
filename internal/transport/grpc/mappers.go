@@ -20,6 +20,28 @@ func toProtoMetadata(metadata provider.Metadata) *providerv1.ProviderMetadata {
 		SupportedAuthSchemes: authSchemes,
 		SupportedServices:    metadata.SupportedServices,
 		Capabilities:         metadata.Capabilities,
+		ResourcePlanes:       toProtoResourcePlanes(metadata.ResourcePlanes),
+	}
+}
+
+func toProtoResourcePlanes(values []provider.ResourcePlane) []providerv1.ResourcePlane {
+	result := make([]providerv1.ResourcePlane, 0, len(values))
+	for _, value := range values {
+		result = append(result, toProtoResourcePlane(value))
+	}
+	return result
+}
+
+func toProtoResourcePlane(value provider.ResourcePlane) providerv1.ResourcePlane {
+	switch value {
+	case provider.ResourcePlaneCompute:
+		return providerv1.ResourcePlane_RESOURCE_PLANE_COMPUTE
+	case provider.ResourcePlaneStorage:
+		return providerv1.ResourcePlane_RESOURCE_PLANE_STORAGE
+	case provider.ResourcePlaneNetwork:
+		return providerv1.ResourcePlane_RESOURCE_PLANE_NETWORK
+	default:
+		return providerv1.ResourcePlane_RESOURCE_PLANE_UNSPECIFIED
 	}
 }
 

@@ -33,6 +33,13 @@ enum AuthScheme {
   AUTH_SCHEME_GCP_SERVICE_ACCOUNT = 3;
 }
 
+enum ResourcePlane {
+  RESOURCE_PLANE_UNSPECIFIED = 0;
+  RESOURCE_PLANE_COMPUTE = 1;
+  RESOURCE_PLANE_STORAGE = 2;
+  RESOURCE_PLANE_NETWORK = 3;
+}
+
 message RequestContext {
   string request_id = 1;
   string caller = 2;
@@ -84,6 +91,7 @@ message ProviderMetadata {
   repeated AuthScheme supported_auth_schemes = 4;
   repeated string supported_services = 5;
   map<string, string> capabilities = 6;
+  repeated ResourcePlane resource_planes = 7;
 }
 
 message Warning {

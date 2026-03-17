@@ -43,6 +43,7 @@ func (s *Service) Metadata(context.Context) (provider.Metadata, error) {
 			"runtime":    "provider",
 			"extensible": "true",
 		},
+		ResourcePlanes: []provider.ResourcePlane{provider.ResourcePlaneCompute},
 	}, nil
 }
 

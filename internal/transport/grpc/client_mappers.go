@@ -84,6 +84,28 @@ func toDomainMetadata(metadata *providerv1.ProviderMetadata) provider.Metadata {
 		SupportedAuth:     authSchemes,
 		SupportedServices: metadata.GetSupportedServices(),
 		Capabilities:      metadata.GetCapabilities(),
+		ResourcePlanes:    toDomainResourcePlanes(metadata.GetResourcePlanes()),
+	}
+}
+
+func toDomainResourcePlanes(values []providerv1.ResourcePlane) []provider.ResourcePlane {
+	result := make([]provider.ResourcePlane, 0, len(values))
+	for _, value := range values {
+		result = append(result, toDomainResourcePlane(value))
+	}
+	return result
+}
+
+func toDomainResourcePlane(value providerv1.ResourcePlane) provider.ResourcePlane {
+	switch value {
+	case providerv1.ResourcePlane_RESOURCE_PLANE_COMPUTE:
+		return provider.ResourcePlaneCompute
+	case providerv1.ResourcePlane_RESOURCE_PLANE_STORAGE:
+		return provider.ResourcePlaneStorage
+	case providerv1.ResourcePlane_RESOURCE_PLANE_NETWORK:
+		return provider.ResourcePlaneNetwork
+	default:
+		return ""
 	}
 }
 

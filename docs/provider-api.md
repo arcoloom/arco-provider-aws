@@ -86,7 +86,7 @@ If the token is missing, malformed, or does not match, the provider returns `Una
 
 | Order | RPC | Purpose |
 | --- | --- | --- |
-| 1 | `GetProviderInfo` | Discover provider identity, version, supported capabilities, and auth schemes. |
+| 1 | `GetProviderInfo` | Discover provider identity, resource planes, supported services, and auth schemes. |
 | 2 | `ValidateConnection` | Check whether credentials and scope are accepted before resource operations. |
 | 3 | `Ping` | Optional liveness or round-trip check. |
 | 4 | Business RPCs | Invoke catalog, pricing, spot/preemptible, or lifecycle operations as needed. |
@@ -231,7 +231,7 @@ All field names below map directly to `proto/arco/provider/v1/provider.proto`. I
 
 ### 4.1 `GetProviderInfo`
 
-Purpose: Return provider metadata and declared capabilities.
+Purpose: Return provider metadata and declared resource planes.
 
 Request: `GetProviderInfoRequest`
 
@@ -245,6 +245,7 @@ Response: `GetProviderInfoResponse`
 | `metadata.version` | `string` | Provider version. |
 | `metadata.cloud` | `Cloud` | Cloud type targeted by the provider. |
 | `metadata.supported_auth_schemes` | `repeated AuthScheme` | Supported authentication schemes. |
+| `metadata.resource_planes` | `repeated ResourcePlane` | Resource planes owned by this provider, such as `COMPUTE`, `STORAGE`, or `NETWORK`. |
 | `metadata.supported_services` | `repeated string` | Supported service domains such as `compute`, `catalog`, or `pricing`. |
 | `metadata.capabilities` | `map<string,string>` | Extension capability map, suitable for feature flags. |
 
@@ -252,7 +253,8 @@ Host guidance:
 
 - Call this once right after startup and cache it for the lifetime of the process.
 - Use `supported_auth_schemes` to decide how to construct `Credentials`.
-- Use `supported_services` and `capabilities` for feature gating instead of hard-coding provider names.
+- Use `resource_planes` as the primary host-side routing signal instead of hard-coding provider names.
+- Use `supported_services` and `capabilities` for finer-grained feature gating within a resource plane.
 
 ### 4.2 `ValidateConnection`
 

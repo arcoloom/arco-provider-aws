@@ -18,6 +18,14 @@ const (
 	AuthSchemeGCPServiceAccount AuthScheme = "gcp_service_account"
 )
 
+type ResourcePlane string
+
+const (
+	ResourcePlaneCompute ResourcePlane = "compute"
+	ResourcePlaneStorage ResourcePlane = "storage"
+	ResourcePlaneNetwork ResourcePlane = "network"
+)
+
 type Metadata struct {
 	Name              string
 	Version           string
@@ -25,6 +33,7 @@ type Metadata struct {
 	SupportedAuth     []AuthScheme
 	SupportedServices []string
 	Capabilities      map[string]string
+	ResourcePlanes    []ResourcePlane
 }
 
 type RequestContext struct {
