@@ -81,7 +81,6 @@ func validateListActiveInstancesRequest(req provider.ListActiveInstancesRequest)
 }
 
 func normalizeListActiveInstancesRequest(req provider.ListActiveInstancesRequest) provider.ListActiveInstancesRequest {
-	req.Scope.Region = strings.TrimSpace(req.Scope.Region)
 	req.Regions = normalizeListFilterValues(req.Regions)
 	req.AvailabilityZones = normalizeListFilterValues(req.AvailabilityZones)
 	req.InstanceTypes = normalizeListFilterValues(req.InstanceTypes)
@@ -159,7 +158,7 @@ func effectiveListActiveInstancesBaseRegion(req provider.ListActiveInstancesRequ
 		return req.Regions[0]
 	}
 
-	return effectiveDiscoveryBaseRegion("", req.Scope.Region)
+	return effectiveDiscoveryBaseRegion("")
 }
 
 func resolveListActiveInstancesRegions(ctx context.Context, client ec2API, req provider.ListActiveInstancesRequest) ([]string, error) {

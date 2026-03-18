@@ -116,9 +116,6 @@ func TestStopInstanceDelegatesToRunner(t *testing.T) {
 			},
 		},
 		StackName: "stack-a",
-		Scope: provider.ConnectionScope{
-			Region: " us-west-2 ",
-		},
 	})
 	if err != nil {
 		t.Fatalf("StopInstance returned error: %v", err)
@@ -130,15 +127,19 @@ func TestStopInstanceDelegatesToRunner(t *testing.T) {
 	if runner.stopReq.StackName != "stack-a" {
 		t.Fatalf("unexpected stop request: %+v", runner.stopReq)
 	}
-	if runner.stopReq.Scope.Region != "us-west-2" {
-		t.Fatalf("expected stop region to be normalized, got %+v", runner.stopReq)
-	}
 }
 
-func TestStopInstanceRequiresExplicitScopeRegion(t *testing.T) {
-	service := &Service{instanceRunner: &fakeInstanceLifecycleRunner{}}
+func TestStopInstanceDoesNotRequireScopeRegion(t *testing.T) {
+	service := &Service{
+		instanceRunner: &fakeInstanceLifecycleRunner{
+			stopResult: provider.StopInstanceResult{
+				StackName: "stack-a",
+				Destroyed: true,
+			},
+		},
+	}
 
-	_, err := service.StopInstance(context.Background(), provider.StopInstanceRequest{
+	result, err := service.StopInstance(context.Background(), provider.StopInstanceRequest{
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
@@ -147,8 +148,11 @@ func TestStopInstanceRequiresExplicitScopeRegion(t *testing.T) {
 		},
 		StackName: "stack-a",
 	})
-	if err == nil || !strings.Contains(err.Error(), "scope.region is required") {
-		t.Fatalf("expected explicit stop region validation error, got %v", err)
+	if err != nil {
+		t.Fatalf("expected stop request without scope region to pass validation, got %v", err)
+	}
+	if !result.Destroyed {
+		t.Fatalf("expected destroyed result, got %+v", result)
 	}
 }
 
@@ -487,8 +491,8 @@ func TestStopInstanceTerminatesMatchedInstances(t *testing.T) {
 			},
 		},
 		StackName: "stack-a",
-		Scope: provider.ConnectionScope{
-			Region: "us-west-2",
+		Options: map[string]string{
+			optionRegions: "us-west-2",
 		},
 	})
 	if err != nil {

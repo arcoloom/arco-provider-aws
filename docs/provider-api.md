@@ -331,7 +331,7 @@ Implementation notes:
 
 - The current sample uses live EC2 account metadata, so results are not limited to catalog-covered regions.
 - When catalog region names are available, the provider enriches `name`; otherwise it may fall back to the region code.
-- If a custom endpoint is used, `scope.region` or a provider default may still be used as the base signing region for the initial EC2 call.
+- If a custom endpoint is used, `endpoint_region` or a provider default may still be used as the base signing region for the initial EC2 call.
 
 ### 4.5 `ListAvailabilityZones`
 
@@ -367,7 +367,7 @@ Each `items` element is an `AvailabilityZone`:
 
 Implementation notes:
 
-- If `region` is empty, the provider falls back to `scope.region`; if both are empty, the current sample may fan out across all enabled regions.
+- If `region` is empty, the current sample fans out across all enabled regions visible to the caller.
 - The current sample matches `availability_zones` against either zone names or stable zone IDs.
 - Missing requested zones may be returned as warnings such as `AZ_NOT_FOUND`.
 
@@ -408,7 +408,7 @@ Each `items` element is a `SpotData` record:
 Implementation notes:
 
 - The current sample implementation requires at least one `instance_types` value.
-- If `region` is empty, the provider attempts to fall back to `scope.region`.
+- If `region` is empty and no explicit `options.regions` override is provided, the current sample fans out across all enabled regions visible to the caller.
 - If the caller uses an all-regions selector, the provider may fan out across multiple regions.
 - If a requested availability zone does not exist, the RPC may still succeed and return warnings such as `AZ_NOT_FOUND`.
 
@@ -478,7 +478,7 @@ Response: `StopInstanceResponse`
 | `destroyed` | `bool` | Whether the resource was successfully destroyed. |
 | `warnings` | `repeated Warning` | Non-blocking warnings. |
 
-The current sample implementation requires both `stack_name` and `scope.region`, and terminates instances matched by the `ArcoloomStack=<stack_name>` tag.
+The current sample implementation requires `stack_name`, dynamically resolves target regions from `options.regions` or enabled account regions, and terminates instances matched by the `ArcoloomStack=<stack_name>` tag.
 
 ### 4.9 `ListInstanceTypes`
 
@@ -516,7 +516,7 @@ Each `items` element is an `InstanceTypeSummary`:
 
 Implementation notes:
 
-- If `region` is empty, the provider may fall back to `scope.region`.
+- If `region` is empty, the provider returns unfiltered catalog results across supported regions.
 - The current sample implementation matches `series`, `instance_types`, `architectures`, and `generation` case-insensitively.
 - If requested instance types are not found, the provider may return `INSTANCE_TYPE_NOT_FOUND` warnings.
 
@@ -624,7 +624,7 @@ Current sample defaults:
 
 Current sample constraints:
 
-- If `region` is empty, the provider falls back to `scope.region`; if still unresolved, it returns an error.
+- `region` must be supplied explicitly for price queries; otherwise the provider returns an error.
 - Only `PURCHASE_OPTION_ON_DEMAND` is currently supported.
 - Prices are sourced from Arcoloom `instance_regions.json` catalog data and currently cover the standardized `Linux` + `Shared` + `NA` + `No License required` + `USD` combination.
 - If a requested instance type has no matching price, the provider may return `PRICE_NOT_FOUND` warnings.

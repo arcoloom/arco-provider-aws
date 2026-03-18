@@ -59,9 +59,6 @@ func validateStopInstanceRequest(req provider.StopInstanceRequest) error {
 	if req.Credentials.AWS == nil {
 		return errors.New("aws iam credentials are required")
 	}
-	if strings.TrimSpace(req.Scope.Region) == "" {
-		return errors.New("scope.region is required; automatic fallback to provider defaults is disabled")
-	}
 
 	return nil
 }
@@ -89,7 +86,5 @@ func normalizeStartInstanceRequest(req provider.StartInstanceRequest) provider.S
 
 func normalizeStopInstanceRequest(req provider.StopInstanceRequest) provider.StopInstanceRequest {
 	req.StackName = strings.TrimSpace(req.StackName)
-	req.Scope.Region = strings.TrimSpace(req.Scope.Region)
-
 	return req
 }

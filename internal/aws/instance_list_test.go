@@ -71,7 +71,6 @@ func TestListActiveInstancesWithoutFiltersReturnsAllActiveInstancesAcrossAccount
 				SecretAccessKey: "sk",
 			},
 		},
-		Scope: provider.ConnectionScope{Region: "us-east-1"},
 	})
 	if err != nil {
 		t.Fatalf("ListActiveInstances returned error: %v", err)

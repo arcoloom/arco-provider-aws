@@ -18,7 +18,7 @@ func (s *Service) ListRegions(ctx context.Context, req provider.ListRegionsReque
 		return provider.ListRegionsResult{}, errors.New("aws iam credentials are required")
 	}
 
-	baseRegion := effectiveDiscoveryBaseRegion("", req.Scope.Region)
+	baseRegion := effectiveDiscoveryBaseRegion("")
 	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
 	if err != nil {
 		return provider.ListRegionsResult{}, err
@@ -53,7 +53,7 @@ func (s *Service) ListAvailabilityZones(ctx context.Context, req provider.ListAv
 		return provider.ListAvailabilityZonesResult{}, errors.New("aws iam credentials are required")
 	}
 
-	baseRegion := effectiveDiscoveryBaseRegion(req.Region, req.Scope.Region)
+	baseRegion := effectiveDiscoveryBaseRegion(req.Region)
 	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
 	if err != nil {
 		return provider.ListAvailabilityZonesResult{}, err
@@ -63,7 +63,7 @@ func (s *Service) ListAvailabilityZones(ctx context.Context, req provider.ListAv
 		Config:   cfg,
 		Endpoint: req.Scope.Endpoint,
 	})
-	regions, err := resolveAccountRegions(ctx, baseClient, req.Region, req.Scope.Region)
+	regions, err := resolveAccountRegions(ctx, baseClient, req.Region)
 	if err != nil {
 		return provider.ListAvailabilityZonesResult{}, err
 	}
@@ -108,22 +108,17 @@ func (s *Service) ListAvailabilityZones(ctx context.Context, req provider.ListAv
 	}, nil
 }
 
-func effectiveDiscoveryBaseRegion(requestedRegion string, scopeRegion string) string {
+func effectiveDiscoveryBaseRegion(requestedRegion string) string {
 	switch {
 	case strings.TrimSpace(requestedRegion) != "" && !isAllSelector(requestedRegion):
 		return strings.TrimSpace(requestedRegion)
-	case strings.TrimSpace(scopeRegion) != "" && !isAllSelector(scopeRegion):
-		return strings.TrimSpace(scopeRegion)
 	default:
 		return defaultAWSRegion
 	}
 }
 
-func resolveAccountRegions(ctx context.Context, client ec2API, requestedRegion string, scopeRegion string) ([]string, error) {
+func resolveAccountRegions(ctx context.Context, client ec2API, requestedRegion string) ([]string, error) {
 	targetRegion := strings.TrimSpace(requestedRegion)
-	if targetRegion == "" {
-		targetRegion = strings.TrimSpace(scopeRegion)
-	}
 
 	if targetRegion != "" && !isAllSelector(targetRegion) {
 		return []string{targetRegion}, nil
@@ -132,7 +127,7 @@ func resolveAccountRegions(ctx context.Context, client ec2API, requestedRegion s
 	return listAccountRegions(ctx, client)
 }
 
-func effectiveDiscoveryBaseRegionWithOptions(requestedRegion string, scopeRegion string, options map[string]string) (string, error) {
+func effectiveDiscoveryBaseRegionWithOptions(requestedRegion string, options map[string]string) (string, error) {
 	regions, hasOption, err := explicitRegionsOption(options)
 	if err != nil {
 		return "", err
@@ -141,14 +136,13 @@ func effectiveDiscoveryBaseRegionWithOptions(requestedRegion string, scopeRegion
 		return regions[0], nil
 	}
 
-	return effectiveDiscoveryBaseRegion(requestedRegion, scopeRegion), nil
+	return effectiveDiscoveryBaseRegion(requestedRegion), nil
 }
 
 func resolveAccountRegionsWithOptions(
 	ctx context.Context,
 	client ec2API,
 	requestedRegion string,
-	scopeRegion string,
 	options map[string]string,
 ) ([]string, error) {
 	regions, hasOption, err := explicitRegionsOption(options)
@@ -162,7 +156,7 @@ func resolveAccountRegionsWithOptions(
 		return regions, nil
 	}
 
-	return resolveAccountRegions(ctx, client, requestedRegion, scopeRegion)
+	return resolveAccountRegions(ctx, client, requestedRegion)
 }
 
 func listAccountRegions(ctx context.Context, client ec2API) ([]string, error) {

@@ -253,11 +253,11 @@ func effectiveEndpointRegion(scope provider.ConnectionScope, fallbackRegion stri
 }
 
 func effectiveBaseRegion(req provider.GetSpotDataRequest) (string, error) {
-	return effectiveDiscoveryBaseRegionWithOptions(req.Region, req.Scope.Region, req.Options)
+	return effectiveDiscoveryBaseRegionWithOptions(req.Region, req.Options)
 }
 
 func resolveRegions(ctx context.Context, client ec2API, req provider.GetSpotDataRequest) ([]string, []provider.Warning, error) {
-	regions, err := resolveAccountRegionsWithOptions(ctx, client, req.Region, req.Scope.Region, req.Options)
+	regions, err := resolveAccountRegionsWithOptions(ctx, client, req.Region, req.Options)
 	if err != nil {
 		return nil, nil, err
 	}

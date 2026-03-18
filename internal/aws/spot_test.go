@@ -62,9 +62,7 @@ func TestGetSpotDataSingleRegionAndAZ(t *testing.T) {
 				SecretAccessKey: "sk",
 			},
 		},
-		Scope: provider.ConnectionScope{
-			Region: "us-east-1",
-		},
+		Region:            "us-east-1",
 		InstanceTypes:     []string{"m6i.large"},
 		AvailabilityZones: []string{"us-east-1a"},
 	})
@@ -216,9 +214,6 @@ func TestGetSpotDataExplicitRegionOptionFansOutSelectedRegions(t *testing.T) {
 				AccessKeyID:     "ak",
 				SecretAccessKey: "sk",
 			},
-		},
-		Scope: provider.ConnectionScope{
-			Region: "us-east-1",
 		},
 		InstanceTypes: []string{"c7g.medium"},
 		Options: map[string]string{

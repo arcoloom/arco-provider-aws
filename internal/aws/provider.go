@@ -54,8 +54,7 @@ func (s *Service) ValidateConnection(ctx context.Context, req provider.ValidateC
 		return rejectedValidation("aws iam credentials are required"), nil
 	}
 
-	resourceRegion := strings.TrimSpace(req.Scope.Region)
-	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, resourceRegion), req.Scope.Endpoint)
+	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, defaultAWSRegion), req.Scope.Endpoint)
 	if err != nil {
 		return rejectedValidation(fmt.Sprintf("build aws client config: %v", err)), nil
 	}

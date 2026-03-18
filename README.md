@@ -7,7 +7,7 @@ The provider now exposes `StartInstance` and `StopInstance` RPCs for EC2 lifecyc
 - `StartInstance` provisions an EC2 instance directly through the AWS SDK and accepts parameters such as `instance_type`, `market_type` (`on-demand` or `spot`), `ami`, subnet, security groups, key pair, user data, and tags.
 - If `ami` is omitted, the provider resolves the latest Debian 13 AMI from Debian's public SSM parameters based on the instance architecture.
 - `StartInstance` requires an explicit `region`; it no longer falls back to `scope.region` or `us-east-1`.
-- `StopInstance` finds EC2 instances tagged with the request `stack_name` and terminates them through the AWS SDK.
+- `StopInstance` finds EC2 instances tagged with the request `stack_name` and terminates them through the AWS SDK, scanning either `options.regions` or all enabled account regions.
 
 ## Catalog and pricing
 

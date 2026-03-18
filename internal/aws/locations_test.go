@@ -41,9 +41,6 @@ func TestListRegionsReturnsAccountEnabledRegions(t *testing.T) {
 				SecretAccessKey: "sk",
 			},
 		},
-		Scope: provider.ConnectionScope{
-			Region: "us-east-1",
-		},
 	})
 	if err != nil {
 		t.Fatalf("ListRegions returned error: %v", err)

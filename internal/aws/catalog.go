@@ -357,7 +357,7 @@ func (s *Service) ListInstanceTypes(ctx context.Context, req provider.ListInstan
 		return provider.ListInstanceTypesResult{}, err
 	}
 
-	regionFilter := effectiveCatalogRegion(req.Region, req.Scope.Region)
+	regionFilter := effectiveCatalogRegion(req.Region)
 	generationFilter := normalizeToken(req.Generation)
 	seriesFilter := buildNormalizedSet(req.Series)
 	typeFilter := buildNormalizedSet(req.InstanceTypes)
@@ -385,7 +385,7 @@ func (s *Service) GetInstanceTypeInfo(ctx context.Context, req provider.GetInsta
 		return provider.GetInstanceTypeInfoResult{}, err
 	}
 
-	regionFilter := effectiveCatalogRegion(req.Region, req.Scope.Region)
+	regionFilter := effectiveCatalogRegion(req.Region)
 	seriesFilter := buildNormalizedSet(req.Series)
 	typeFilter := buildNormalizedSet(req.InstanceTypes)
 
@@ -416,7 +416,7 @@ func (s *Service) GetInstanceTypeInfo(ctx context.Context, req provider.GetInsta
 }
 
 func (s *Service) GetInstancePrices(ctx context.Context, req provider.GetInstancePricesRequest) (provider.GetInstancePricesResult, error) {
-	region := effectiveCatalogRegion(req.Region, req.Scope.Region)
+	region := effectiveCatalogRegion(req.Region)
 	if region == "" {
 		return provider.GetInstancePricesResult{}, errors.New("region is required for price queries")
 	}
@@ -780,11 +780,8 @@ func buildMissingPriceWarnings(requested []string, items []provider.InstancePric
 	return warnings
 }
 
-func effectiveCatalogRegion(requestedRegion string, scopeRegion string) string {
+func effectiveCatalogRegion(requestedRegion string) string {
 	if region := strings.TrimSpace(requestedRegion); region != "" && !isAllSelector(region) {
-		return region
-	}
-	if region := strings.TrimSpace(scopeRegion); region != "" && !isAllSelector(region) {
 		return region
 	}
 	return ""

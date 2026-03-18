@@ -95,16 +95,46 @@ func (r ec2InstanceLifecycleRunner) Stop(ctx context.Context, req provider.StopI
 		}, nil
 	}
 
-	_, ec2Client, _, err := r.clients(ctx, req.Credentials, req.Scope.Region, req.Scope)
+	baseRegion, err := effectiveDiscoveryBaseRegionWithOptions("", req.Options)
 	if err != nil {
 		return provider.StopInstanceResult{}, err
 	}
 
-	instanceIDs, err := managedInstanceIDs(ctx, ec2Client, req.StackName)
+	_, baseClient, _, err := r.clients(ctx, req.Credentials, baseRegion, req.Scope)
 	if err != nil {
 		return provider.StopInstanceResult{}, err
 	}
-	if len(instanceIDs) == 0 {
+
+	regions, err := resolveAccountRegionsWithOptions(ctx, baseClient, "", req.Options)
+	if err != nil {
+		return provider.StopInstanceResult{}, err
+	}
+
+	destroyedAny := false
+	for _, region := range regions {
+		_, ec2Client, _, err := r.clients(ctx, req.Credentials, region, req.Scope)
+		if err != nil {
+			return provider.StopInstanceResult{}, fmt.Errorf("build ec2 client for region %s: %w", region, err)
+		}
+
+		instanceIDs, err := managedInstanceIDs(ctx, ec2Client, req.StackName)
+		if err != nil {
+			return provider.StopInstanceResult{}, fmt.Errorf("find managed instances for stack %s in region %s: %w", req.StackName, region, err)
+		}
+		if len(instanceIDs) == 0 {
+			continue
+		}
+
+		if _, err := ec2Client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+			InstanceIds: instanceIDs,
+		}); err != nil {
+			return provider.StopInstanceResult{}, fmt.Errorf("terminate instances for stack %s in region %s: %w", req.StackName, region, err)
+		}
+
+		destroyedAny = true
+	}
+
+	if !destroyedAny {
 		return provider.StopInstanceResult{
 			StackName: req.StackName,
 			Destroyed: true,
@@ -113,12 +143,6 @@ func (r ec2InstanceLifecycleRunner) Stop(ctx context.Context, req provider.StopI
 				Message: fmt.Sprintf("no running instances were found for stack %s", req.StackName),
 			}},
 		}, nil
-	}
-
-	if _, err := ec2Client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
-		InstanceIds: instanceIDs,
-	}); err != nil {
-		return provider.StopInstanceResult{}, fmt.Errorf("terminate instances for stack %s: %w", req.StackName, err)
 	}
 
 	return provider.StopInstanceResult{
