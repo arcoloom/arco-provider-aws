@@ -61,6 +61,9 @@ func TestProviderProcessLifecycleAndBusinessCalls(t *testing.T) {
 	if metadata.Cloud != provider.CloudAWS {
 		t.Fatalf("unexpected cloud: %s", metadata.Cloud)
 	}
+	if len(metadata.ResourcePlanes) != 1 || metadata.ResourcePlanes[0] != provider.ResourcePlaneCompute {
+		t.Fatalf("unexpected resource planes: %+v", metadata.ResourcePlanes)
+	}
 
 	validateResp, err := client.ValidateConnection(ctx, provider.ValidateConnectionRequest{
 		Context: provider.RequestContext{
