@@ -3,7 +3,7 @@ package grpcserver
 import (
 	"time"
 
-	providerv1 "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1"
+	providerv1 "github.com/arcoloom/arco-proto/gen/go/arcoloom/provider/v1"
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 	"google.golang.org/protobuf/types/known/structpb"
 )

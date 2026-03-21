@@ -56,11 +56,14 @@ func validateStartInstanceRequest(req provider.StartInstanceRequest) error {
 }
 
 func validateStopInstanceRequest(req provider.StopInstanceRequest) error {
-	if strings.TrimSpace(req.StackName) == "" {
-		return errors.New("stack name is required")
-	}
 	if req.Credentials.AWS == nil {
 		return errors.New("aws iam credentials are required")
+	}
+	if strings.TrimSpace(req.InstanceID) == "" {
+		return errors.New("instance id is required")
+	}
+	if strings.TrimSpace(req.Region) == "" {
+		return errors.New("region is required")
 	}
 
 	return nil
@@ -85,6 +88,7 @@ func normalizeStartInstanceRequest(req provider.StartInstanceRequest) provider.S
 }
 
 func normalizeStopInstanceRequest(req provider.StopInstanceRequest) provider.StopInstanceRequest {
-	req.StackName = strings.TrimSpace(req.StackName)
+	req.InstanceID = strings.TrimSpace(req.InstanceID)
+	req.Region = strings.TrimSpace(req.Region)
 	return req
 }

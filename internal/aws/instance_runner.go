@@ -91,68 +91,35 @@ func (r ec2InstanceLifecycleRunner) Start(ctx context.Context, req provider.Star
 func (r ec2InstanceLifecycleRunner) Stop(ctx context.Context, req provider.StopInstanceRequest) (provider.StopInstanceResult, error) {
 	if dryRunEnabled(req.Options) {
 		return provider.StopInstanceResult{
-			StackName: req.StackName,
-			Destroyed: true,
+			InstanceID: req.InstanceID,
+			Destroyed:  true,
 			Warnings: []provider.Warning{{
 				Code:    warningCodeDryRun,
 				Message: "stop_instance executed in dry-run mode; no AWS resources were terminated",
 			}},
 		}, nil
 	}
+	if strings.TrimSpace(req.InstanceID) == "" {
+		return provider.StopInstanceResult{}, errors.New("instance_id is required")
+	}
+	if strings.TrimSpace(req.Region) == "" {
+		return provider.StopInstanceResult{}, errors.New("region is required")
+	}
 
-	baseRegion, err := effectiveDiscoveryBaseRegionWithOptions("", req.Options)
+	_, ec2Client, _, err := r.clients(ctx, req.Credentials, req.Region, req.Scope)
 	if err != nil {
 		return provider.StopInstanceResult{}, err
 	}
 
-	_, baseClient, _, err := r.clients(ctx, req.Credentials, baseRegion, req.Scope)
-	if err != nil {
-		return provider.StopInstanceResult{}, err
-	}
-
-	regions, err := resolveAccountRegionsWithOptions(ctx, baseClient, "", req.Options)
-	if err != nil {
-		return provider.StopInstanceResult{}, err
-	}
-
-	destroyedAny := false
-	for _, region := range regions {
-		_, ec2Client, _, err := r.clients(ctx, req.Credentials, region, req.Scope)
-		if err != nil {
-			return provider.StopInstanceResult{}, fmt.Errorf("build ec2 client for region %s: %w", region, err)
-		}
-
-		instanceIDs, err := managedInstanceIDs(ctx, ec2Client, req.StackName)
-		if err != nil {
-			return provider.StopInstanceResult{}, fmt.Errorf("find managed instances for stack %s in region %s: %w", req.StackName, region, err)
-		}
-		if len(instanceIDs) == 0 {
-			continue
-		}
-
-		if _, err := ec2Client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
-			InstanceIds: instanceIDs,
-		}); err != nil {
-			return provider.StopInstanceResult{}, fmt.Errorf("terminate instances for stack %s in region %s: %w", req.StackName, region, err)
-		}
-
-		destroyedAny = true
-	}
-
-	if !destroyedAny {
-		return provider.StopInstanceResult{
-			StackName: req.StackName,
-			Destroyed: true,
-			Warnings: []provider.Warning{{
-				Code:    warningCodeInstancesAbsent,
-				Message: fmt.Sprintf("no running instances were found for stack %s", req.StackName),
-			}},
-		}, nil
+	if _, err := ec2Client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+		InstanceIds: []string{req.InstanceID},
+	}); err != nil {
+		return provider.StopInstanceResult{}, fmt.Errorf("terminate instance %s in region %s: %w", req.InstanceID, req.Region, err)
 	}
 
 	return provider.StopInstanceResult{
-		StackName: req.StackName,
-		Destroyed: true,
+		InstanceID: req.InstanceID,
+		Destroyed:  true,
 	}, nil
 }
 
@@ -428,36 +395,6 @@ func buildEC2Tags(req provider.StartInstanceRequest) []ec2types.Tag {
 		})
 	}
 	return result
-}
-
-func managedInstanceIDs(ctx context.Context, ec2Client ec2API, stackName string) ([]string, error) {
-	output, err := ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-		Filters: []ec2types.Filter{
-			{
-				Name:   awsv2.String("tag:" + stackTagKey),
-				Values: []string{stackName},
-			},
-			{
-				Name:   awsv2.String("instance-state-name"),
-				Values: []string{"pending", "running", "stopping", "stopped"},
-			},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("describe instances for stack %s: %w", stackName, err)
-	}
-
-	var instanceIDs []string
-	for _, reservation := range output.Reservations {
-		for _, instance := range reservation.Instances {
-			if instance.InstanceId == nil || *instance.InstanceId == "" {
-				continue
-			}
-			instanceIDs = append(instanceIDs, *instance.InstanceId)
-		}
-	}
-	sort.Strings(instanceIDs)
-	return instanceIDs, nil
 }
 
 func dryRunEnabled(options map[string]string) bool {

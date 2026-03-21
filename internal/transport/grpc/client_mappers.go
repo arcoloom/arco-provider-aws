@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	providerv1 "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1"
+	providerv1 "github.com/arcoloom/arco-proto/gen/go/arcoloom/provider/v1"
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -306,9 +306,9 @@ func toDomainStopInstanceResult(resp *providerv1.StopInstanceResponse) provider.
 	}
 
 	return provider.StopInstanceResult{
-		StackName: resp.GetStackName(),
-		Destroyed: resp.GetDestroyed(),
-		Warnings:  warnings,
+		InstanceID: resp.GetInstanceId(),
+		Destroyed:  resp.GetDestroyed(),
+		Warnings:   warnings,
 	}
 }
 

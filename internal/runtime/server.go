@@ -10,7 +10,7 @@ import (
 	"net"
 	"os"
 
-	providerv1 "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1"
+	providerv1 "github.com/arcoloom/arco-proto/gen/go/arcoloom/provider/v1"
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 	grpcserver "github.com/arcoloom/arco-provider-aws/internal/transport/grpc"
 	"google.golang.org/grpc"

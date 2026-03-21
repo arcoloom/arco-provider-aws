@@ -243,13 +243,15 @@ type StopInstanceRequest struct {
 	Credentials Credentials
 	Scope       ConnectionScope
 	StackName   string
+	InstanceID  string
+	Region      string
 	Options     map[string]string
 }
 
 type StopInstanceResult struct {
-	StackName string
-	Destroyed bool
-	Warnings  []Warning
+	InstanceID string
+	Destroyed  bool
+	Warnings   []Warning
 }
 
 type ListActiveInstancesRequest struct {

@@ -7,7 +7,7 @@ Protocol sources:
 - Entry point: `cmd/arco-provider-aws/main.go`
 - Runtime handshake: `internal/runtime/server.go`
 - gRPC authentication: `internal/transport/grpc/auth.go`
-- Service definition: `proto/arco/provider/v1/provider.proto`
+- Service definition: `../arco-proto/proto/arcoloom/provider/v1/provider.proto`
 
 ## 1. Overview
 
@@ -229,7 +229,7 @@ Contract:
 
 ## 4. API Reference
 
-All field names below map directly to `proto/arco/provider/v1/provider.proto`. If you use `grpcurl` or another protobuf JSON client, send request payloads using protobuf JSON field names.
+All field names below map directly to `../arco-proto/proto/arcoloom/provider/v1/provider.proto`. If you use `grpcurl` or another protobuf JSON client, send request payloads using protobuf JSON field names.
 
 ### 4.1 `GetProviderInfo`
 
@@ -675,12 +675,12 @@ The current provider does not enable server reflection, so `grpcurl` must be giv
 ```bash
 grpcurl \
   -plaintext \
-  -import-path proto \
-  -proto arco/provider/v1/provider.proto \
+  -import-path ../arco-proto/proto \
+  -proto arcoloom/provider/v1/provider.proto \
   -H "authorization: Bearer ${TOKEN}" \
   -d '{}' \
   ${ADDRESS} \
-  arco.provider.v1.ProviderService/GetProviderInfo
+  arcoloom.provider.v1.ProviderService/GetProviderInfo
 ```
 
 #### Send ping
@@ -688,8 +688,8 @@ grpcurl \
 ```bash
 grpcurl \
   -plaintext \
-  -import-path proto \
-  -proto arco/provider/v1/provider.proto \
+  -import-path ../arco-proto/proto \
+  -proto arcoloom/provider/v1/provider.proto \
   -H "authorization: Bearer ${TOKEN}" \
   -d '{
     "context": {
@@ -700,7 +700,7 @@ grpcurl \
     "payload": "hello-provider"
   }' \
   ${ADDRESS} \
-  arco.provider.v1.ProviderService/Ping
+  arcoloom.provider.v1.ProviderService/Ping
 ```
 
 #### Query instance catalog
@@ -708,8 +708,8 @@ grpcurl \
 ```bash
 grpcurl \
   -plaintext \
-  -import-path proto \
-  -proto arco/provider/v1/provider.proto \
+  -import-path ../arco-proto/proto \
+  -proto arcoloom/provider/v1/provider.proto \
   -H "authorization: Bearer ${TOKEN}" \
   -d '{
     "context": {
@@ -724,7 +724,7 @@ grpcurl \
     "generation": "current"
   }' \
   ${ADDRESS} \
-  arco.provider.v1.ProviderService/ListInstanceTypes
+  arcoloom.provider.v1.ProviderService/ListInstanceTypes
 ```
 
 #### Create an instance
@@ -732,8 +732,8 @@ grpcurl \
 ```bash
 grpcurl \
   -plaintext \
-  -import-path proto \
-  -proto arco/provider/v1/provider.proto \
+  -import-path ../arco-proto/proto \
+  -proto arcoloom/provider/v1/provider.proto \
   -H "authorization: Bearer ${TOKEN}" \
   -d '{
     "context": {
@@ -765,7 +765,7 @@ grpcurl \
     ]
   }' \
   ${ADDRESS} \
-  arco.provider.v1.ProviderService/StartInstance
+  arcoloom.provider.v1.ProviderService/StartInstance
 ```
 
 Notes:

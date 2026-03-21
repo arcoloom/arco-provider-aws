@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	providerv1 "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1"
+	providerv1 "github.com/arcoloom/arco-proto/gen/go/arcoloom/provider/v1"
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 )
 
@@ -227,7 +227,8 @@ func (s *Server) StopInstance(ctx context.Context, req *providerv1.StopInstanceR
 		Context:     toDomainContext(req.GetContext()),
 		Credentials: toDomainCredentials(req.GetCredentials()),
 		Scope:       toDomainScope(req.GetScope()),
-		StackName:   req.GetStackName(),
+		InstanceID:  req.GetInstanceId(),
+		Region:      req.GetRegion(),
 		Options:     req.GetOptions(),
 	}
 
@@ -239,14 +240,15 @@ func (s *Server) StopInstance(ctx context.Context, req *providerv1.StopInstanceR
 	s.logger.Info(
 		"instance stop requested",
 		"request_id", domainReq.Context.RequestID,
-		"stack_name", domainReq.StackName,
+		"instance_id", domainReq.InstanceID,
+		"region", domainReq.Region,
 		"destroyed", result.Destroyed,
 	)
 
 	return &providerv1.StopInstanceResponse{
-		StackName: result.StackName,
-		Destroyed: result.Destroyed,
-		Warnings:  toProtoWarnings(result.Warnings),
+		InstanceId: result.InstanceID,
+		Destroyed:  result.Destroyed,
+		Warnings:   toProtoWarnings(result.Warnings),
 	}, nil
 }
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	providerv1 "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1"
+	providerv1 "github.com/arcoloom/arco-proto/gen/go/arcoloom/provider/v1"
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -162,7 +162,8 @@ func (c *Client) StopInstance(ctx context.Context, req provider.StopInstanceRequ
 		Context:     toProtoContext(req.Context),
 		Credentials: toProtoCredentials(req.Credentials),
 		Scope:       toProtoScope(req.Scope),
-		StackName:   req.StackName,
+		InstanceId:  req.InstanceID,
+		Region:      req.Region,
 		Options:     req.Options,
 	})
 	if err != nil {

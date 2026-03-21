@@ -28,7 +28,7 @@ func TestStartInstanceDelegatesToRunner(t *testing.T) {
 		instanceRunner: runner,
 	}
 
-		result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+	result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
@@ -98,8 +98,8 @@ func TestStartInstanceRequiresExplicitRegion(t *testing.T) {
 func TestStopInstanceDelegatesToRunner(t *testing.T) {
 	runner := &fakeInstanceLifecycleRunner{
 		stopResult: provider.StopInstanceResult{
-			StackName: "stack-a",
-			Destroyed: true,
+			InstanceID: "i-stack-a",
+			Destroyed:  true,
 		},
 	}
 	service := &Service{
@@ -115,7 +115,8 @@ func TestStopInstanceDelegatesToRunner(t *testing.T) {
 				SecretAccessKey: "sk",
 			},
 		},
-		StackName: "stack-a",
+		InstanceID: "i-stack-a",
+		Region:     "us-west-2",
 	})
 	if err != nil {
 		t.Fatalf("StopInstance returned error: %v", err)
@@ -124,7 +125,7 @@ func TestStopInstanceDelegatesToRunner(t *testing.T) {
 	if !result.Destroyed {
 		t.Fatalf("expected destroyed result, got %+v", result)
 	}
-	if runner.stopReq.StackName != "stack-a" {
+	if runner.stopReq.InstanceID != "i-stack-a" || runner.stopReq.Region != "us-west-2" {
 		t.Fatalf("unexpected stop request: %+v", runner.stopReq)
 	}
 }
@@ -133,8 +134,8 @@ func TestStopInstanceDoesNotRequireScopeRegion(t *testing.T) {
 	service := &Service{
 		instanceRunner: &fakeInstanceLifecycleRunner{
 			stopResult: provider.StopInstanceResult{
-				StackName: "stack-a",
-				Destroyed: true,
+				InstanceID: "i-stack-a",
+				Destroyed:  true,
 			},
 		},
 	}
@@ -146,7 +147,8 @@ func TestStopInstanceDoesNotRequireScopeRegion(t *testing.T) {
 				SecretAccessKey: "sk",
 			},
 		},
-		StackName: "stack-a",
+		InstanceID: "i-stack-a",
+		Region:     "us-west-2",
 	})
 	if err != nil {
 		t.Fatalf("expected stop request without scope region to pass validation, got %v", err)
@@ -182,8 +184,9 @@ func TestEC2RunnerDryRunStartAndStop(t *testing.T) {
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{AccessKeyID: "ak", SecretAccessKey: "sk"},
 		},
-		StackName: "stack-a",
-		Options:   map[string]string{"dry_run": "true"},
+		InstanceID: "i-stack-a",
+		Region:     "us-west-2",
+		Options:    map[string]string{"dry_run": "true"},
 	})
 	if err != nil {
 		t.Fatalf("dry-run stop returned error: %v", err)
@@ -247,21 +250,21 @@ func TestStartInstanceCreatesEC2InstanceViaAWSSDK(t *testing.T) {
 				AccessKeyID:     "ak",
 				SecretAccessKey: "sk",
 			},
-			},
-			Region:           "us-west-2",
-			StackName:        " stack-a ",
-			InstanceType:     " t3.micro ",
-			Scope:            provider.ConnectionScope{Region: "us-west-2"},
-			UserData:         "echo hello",
-			Tags: []provider.InstanceTag{
-				{Key: "Environment", Value: "test"},
-			},
-			ProviderConfig: map[string]any{
-				"subnet_id":          "subnet-123",
-				"security_group_ids": []any{"sg-123"},
-				"key_name":           "demo-key",
-			},
-		})
+		},
+		Region:       "us-west-2",
+		StackName:    " stack-a ",
+		InstanceType: " t3.micro ",
+		Scope:        provider.ConnectionScope{Region: "us-west-2"},
+		UserData:     "echo hello",
+		Tags: []provider.InstanceTag{
+			{Key: "Environment", Value: "test"},
+		},
+		ProviderConfig: map[string]any{
+			"subnet_id":          "subnet-123",
+			"security_group_ids": []any{"sg-123"},
+			"key_name":           "demo-key",
+		},
+	})
 	if err != nil {
 		t.Fatalf("StartInstance returned error: %v", err)
 	}
@@ -369,26 +372,26 @@ func TestStartInstanceResolvesDefaultNetworkAndRootVolumeFromOptions(t *testing.
 		instanceRunner: newInstanceLifecycleRunner(factory),
 	}
 
-		_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+	_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
 				SecretAccessKey: "sk",
 			},
 		},
-			Region:           "us-east-1",
-			AvailabilityZone: "us-east-1b",
-			StackName:        "stack-spot",
-			InstanceType:     "c7g.medium",
-			MarketType:       provider.InstanceMarketTypeSpot,
-			ProviderConfig: map[string]any{
-				optionUseDefaultVPC:           true,
-				optionUseDefaultSecurityGroup: true,
-				optionAssociatePublicIPv4:     false,
-				optionAssignPublicIPv6:        true,
-				optionRootVolumeSizeGiB:       int64(20),
-			},
-		})
+		Region:           "us-east-1",
+		AvailabilityZone: "us-east-1b",
+		StackName:        "stack-spot",
+		InstanceType:     "c7g.medium",
+		MarketType:       provider.InstanceMarketTypeSpot,
+		ProviderConfig: map[string]any{
+			optionUseDefaultVPC:           true,
+			optionUseDefaultSecurityGroup: true,
+			optionAssociatePublicIPv4:     false,
+			optionAssignPublicIPv6:        true,
+			optionRootVolumeSizeGiB:       int64(20),
+		},
+	})
 	if err != nil {
 		t.Fatalf("StartInstance returned error: %v", err)
 	}
@@ -492,10 +495,8 @@ func TestStopInstanceTerminatesMatchedInstances(t *testing.T) {
 				SecretAccessKey: "sk",
 			},
 		},
-		StackName: "stack-a",
-		Options: map[string]string{
-			optionRegions: "us-west-2",
-		},
+		InstanceID: "i-a",
+		Region:     "us-west-2",
 	})
 	if err != nil {
 		t.Fatalf("StopInstance returned error: %v", err)
@@ -506,7 +507,7 @@ func TestStopInstanceTerminatesMatchedInstances(t *testing.T) {
 	if ec2Client.terminateInstancesInput == nil {
 		t.Fatal("expected TerminateInstances to be called")
 	}
-	if got := ec2Client.terminateInstancesInput.InstanceIds; len(got) != 2 || got[0] != "i-a" || got[1] != "i-b" {
+	if got := ec2Client.terminateInstancesInput.InstanceIds; len(got) != 1 || got[0] != "i-a" {
 		t.Fatalf("unexpected terminated instance ids: %+v", got)
 	}
 }
