@@ -44,6 +44,15 @@ func (c *Client) GetProviderInfo(ctx context.Context) (provider.Metadata, error)
 	return toDomainMetadata(resp.GetMetadata()), nil
 }
 
+func (c *Client) GetProviderSchema(ctx context.Context) ([]provider.ResourceSchema, error) {
+	resp, err := c.client.GetProviderSchema(c.withAuth(ctx), &providerv1.GetProviderSchemaRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	return toDomainResourceSchemas(resp.GetResources()), nil
+}
+
 func (c *Client) ValidateConnection(ctx context.Context, req provider.ValidateConnectionRequest) (provider.ValidateConnectionResult, error) {
 	resp, err := c.client.ValidateConnection(c.withAuth(ctx), &providerv1.ValidateConnectionRequest{
 		Context:     toProtoContext(req.Context),
@@ -134,15 +143,12 @@ func (c *Client) StartInstance(ctx context.Context, req provider.StartInstanceRe
 		InstanceName:     req.InstanceName,
 		Region:           req.Region,
 		AvailabilityZone: req.AvailabilityZone,
-		Ami:              req.AMI,
 		InstanceType:     req.InstanceType,
 		MarketType:       toProtoInstanceMarketType(req.MarketType),
-		SubnetId:         req.SubnetID,
-		SecurityGroupIds: req.SecurityGroupIDs,
-		KeyName:          req.KeyName,
 		UserData:         req.UserData,
 		Options:          req.Options,
 		Tags:             toProtoInstanceTags(req.Tags),
+		ProviderConfig:   toProtoProviderConfig(req.ProviderConfig),
 	})
 	if err != nil {
 		return provider.StartInstanceResult{}, err

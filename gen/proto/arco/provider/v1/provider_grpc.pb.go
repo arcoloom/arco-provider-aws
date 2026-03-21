@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ProviderService_GetProviderInfo_FullMethodName       = "/arco.provider.v1.ProviderService/GetProviderInfo"
+	ProviderService_GetProviderSchema_FullMethodName     = "/arco.provider.v1.ProviderService/GetProviderSchema"
 	ProviderService_ValidateConnection_FullMethodName    = "/arco.provider.v1.ProviderService/ValidateConnection"
 	ProviderService_Ping_FullMethodName                  = "/arco.provider.v1.ProviderService/Ping"
 	ProviderService_ListRegions_FullMethodName           = "/arco.provider.v1.ProviderService/ListRegions"
@@ -38,6 +39,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProviderServiceClient interface {
 	GetProviderInfo(ctx context.Context, in *GetProviderInfoRequest, opts ...grpc.CallOption) (*GetProviderInfoResponse, error)
+	GetProviderSchema(ctx context.Context, in *GetProviderSchemaRequest, opts ...grpc.CallOption) (*GetProviderSchemaResponse, error)
 	ValidateConnection(ctx context.Context, in *ValidateConnectionRequest, opts ...grpc.CallOption) (*ValidateConnectionResponse, error)
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 	ListRegions(ctx context.Context, in *ListRegionsRequest, opts ...grpc.CallOption) (*ListRegionsResponse, error)
@@ -63,6 +65,16 @@ func (c *providerServiceClient) GetProviderInfo(ctx context.Context, in *GetProv
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProviderInfoResponse)
 	err := c.cc.Invoke(ctx, ProviderService_GetProviderInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *providerServiceClient) GetProviderSchema(ctx context.Context, in *GetProviderSchemaRequest, opts ...grpc.CallOption) (*GetProviderSchemaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProviderSchemaResponse)
+	err := c.cc.Invoke(ctx, ProviderService_GetProviderSchema_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +196,7 @@ func (c *providerServiceClient) GetInstancePrices(ctx context.Context, in *GetIn
 // for forward compatibility.
 type ProviderServiceServer interface {
 	GetProviderInfo(context.Context, *GetProviderInfoRequest) (*GetProviderInfoResponse, error)
+	GetProviderSchema(context.Context, *GetProviderSchemaRequest) (*GetProviderSchemaResponse, error)
 	ValidateConnection(context.Context, *ValidateConnectionRequest) (*ValidateConnectionResponse, error)
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	ListRegions(context.Context, *ListRegionsRequest) (*ListRegionsResponse, error)
@@ -206,6 +219,9 @@ type UnimplementedProviderServiceServer struct{}
 
 func (UnimplementedProviderServiceServer) GetProviderInfo(context.Context, *GetProviderInfoRequest) (*GetProviderInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetProviderInfo not implemented")
+}
+func (UnimplementedProviderServiceServer) GetProviderSchema(context.Context, *GetProviderSchemaRequest) (*GetProviderSchemaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetProviderSchema not implemented")
 }
 func (UnimplementedProviderServiceServer) ValidateConnection(context.Context, *ValidateConnectionRequest) (*ValidateConnectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateConnection not implemented")
@@ -274,6 +290,24 @@ func _ProviderService_GetProviderInfo_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProviderServiceServer).GetProviderInfo(ctx, req.(*GetProviderInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProviderService_GetProviderSchema_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProviderSchemaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProviderServiceServer).GetProviderSchema(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProviderService_GetProviderSchema_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProviderServiceServer).GetProviderSchema(ctx, req.(*GetProviderSchemaRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -486,6 +520,10 @@ var ProviderService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProviderInfo",
 			Handler:    _ProviderService_GetProviderInfo_Handler,
+		},
+		{
+			MethodName: "GetProviderSchema",
+			Handler:    _ProviderService_GetProviderSchema_Handler,
 		},
 		{
 			MethodName: "ValidateConnection",

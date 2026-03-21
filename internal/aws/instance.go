@@ -48,6 +48,9 @@ func validateStartInstanceRequest(req provider.StartInstanceRequest) error {
 	if req.MarketType != "" && req.MarketType != provider.InstanceMarketTypeOnDemand && req.MarketType != provider.InstanceMarketTypeSpot {
 		return fmt.Errorf("unsupported market type %q", req.MarketType)
 	}
+	if _, err := parseStartInstanceProviderConfig(req.ProviderConfig); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -75,10 +78,7 @@ func normalizeStartInstanceRequest(req provider.StartInstanceRequest) provider.S
 	req.InstanceName = strings.TrimSpace(req.InstanceName)
 	req.Region = strings.TrimSpace(req.Region)
 	req.AvailabilityZone = strings.TrimSpace(req.AvailabilityZone)
-	req.AMI = strings.TrimSpace(req.AMI)
 	req.InstanceType = strings.TrimSpace(req.InstanceType)
-	req.SubnetID = strings.TrimSpace(req.SubnetID)
-	req.KeyName = strings.TrimSpace(req.KeyName)
 	req.UserData = strings.TrimSpace(req.UserData)
 
 	return req

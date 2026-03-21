@@ -5,6 +5,7 @@ import (
 
 	providerv1 "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1"
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func toProtoMetadata(metadata provider.Metadata) *providerv1.ProviderMetadata {
@@ -22,6 +23,74 @@ func toProtoMetadata(metadata provider.Metadata) *providerv1.ProviderMetadata {
 		Capabilities:         metadata.Capabilities,
 		ResourcePlanes:       toProtoResourcePlanes(metadata.ResourcePlanes),
 	}
+}
+
+func toProtoResourceSchemas(resources []provider.ResourceSchema) []*providerv1.ProviderResourceSchema {
+	result := make([]*providerv1.ProviderResourceSchema, 0, len(resources))
+	for _, resource := range resources {
+		result = append(result, toProtoResourceSchema(resource))
+	}
+	return result
+}
+
+func toProtoResourceSchema(resource provider.ResourceSchema) *providerv1.ProviderResourceSchema {
+	return &providerv1.ProviderResourceSchema{
+		Type:        resource.Type,
+		Description: resource.Description,
+		Attributes:  toProtoSchemaAttributes(resource.Attributes),
+	}
+}
+
+func toProtoSchemaAttributes(attributes []provider.SchemaAttribute) []*providerv1.SchemaAttribute {
+	result := make([]*providerv1.SchemaAttribute, 0, len(attributes))
+	for _, attribute := range attributes {
+		result = append(result, toProtoSchemaAttribute(attribute))
+	}
+	return result
+}
+
+func toProtoSchemaAttribute(attribute provider.SchemaAttribute) *providerv1.SchemaAttribute {
+	return &providerv1.SchemaAttribute{
+		Name:         attribute.Name,
+		Type:         toProtoSchemaAttributeType(attribute.Type),
+		Required:     attribute.Required,
+		Optional:     attribute.Optional,
+		Computed:     attribute.Computed,
+		Sensitive:    attribute.Sensitive,
+		Description:  attribute.Description,
+		DefaultValue: toProtoDefaultValue(attribute.DefaultValue),
+	}
+}
+
+func toProtoSchemaAttributeType(value provider.SchemaAttributeType) providerv1.SchemaAttributeType {
+	switch value {
+	case provider.SchemaAttributeTypeString:
+		return providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_STRING
+	case provider.SchemaAttributeTypeBool:
+		return providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_BOOL
+	case provider.SchemaAttributeTypeInt64:
+		return providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_INT64
+	case provider.SchemaAttributeTypeFloat64:
+		return providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_FLOAT64
+	case provider.SchemaAttributeTypeStringList:
+		return providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_STRING_LIST
+	case provider.SchemaAttributeTypeStringMap:
+		return providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_STRING_MAP
+	default:
+		return providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_UNSPECIFIED
+	}
+}
+
+func toProtoDefaultValue(value any) *structpb.Value {
+	if value == nil {
+		return nil
+	}
+
+	protoValue, err := structpb.NewValue(value)
+	if err != nil {
+		return nil
+	}
+	return protoValue
 }
 
 func toProtoResourcePlanes(values []provider.ResourcePlane) []providerv1.ResourcePlane {
@@ -100,19 +169,18 @@ func toProtoActiveInstances(items []provider.ActiveInstance) []*providerv1.Activ
 	result := make([]*providerv1.ActiveInstance, 0, len(items))
 	for _, item := range items {
 		protoItem := &providerv1.ActiveInstance{
-			InstanceId:       item.InstanceID,
-			Name:             item.Name,
-			Region:           item.Region,
-			AvailabilityZone: item.AvailabilityZone,
-			InstanceType:     item.InstanceType,
-			State:            item.State,
-			MarketType:       toProtoInstanceMarketType(item.MarketType),
-			PublicIp:         item.PublicIP,
-			PrivateIp:        item.PrivateIP,
-			Ipv6Addresses:    item.IPv6Addresses,
-			SubnetId:         item.SubnetID,
-			VpcId:            item.VPCID,
-			Tags:             toProtoInstanceTags(item.Tags),
+			InstanceId:         item.InstanceID,
+			Name:               item.Name,
+			Region:             item.Region,
+			AvailabilityZone:   item.AvailabilityZone,
+			InstanceType:       item.InstanceType,
+			State:              item.State,
+			MarketType:         toProtoInstanceMarketType(item.MarketType),
+			PublicIp:           item.PublicIP,
+			PrivateIp:          item.PrivateIP,
+			Ipv6Addresses:      item.IPv6Addresses,
+			Tags:               toProtoInstanceTags(item.Tags),
+			ProviderAttributes: item.ProviderAttributes,
 		}
 		if !item.LaunchTime.IsZero() {
 			protoItem.LaunchTime = item.LaunchTime.Format(time.RFC3339)
@@ -222,9 +290,6 @@ func toProtoInstanceTypeInfos(items []provider.InstanceTypeInfo) []*providerv1.I
 			NetworkPerformance:        item.NetworkPerformance,
 			EnhancedNetworking:        item.EnhancedNetworking,
 			Ipv6Supported:             item.IPv6Supported,
-			PlacementGroupSupported:   item.PlacementGroupSupported,
-			VpcOnly:                   item.VPCOnly,
-			EbsOptimized:              item.EBSOptimized,
 			SupportedRegions:          toProtoRegions(item.SupportedRegions),
 			SupportedOperatingSystems: item.SupportedOperatingSystems,
 			Accelerators:              toProtoAccelerators(item.Accelerators),
@@ -286,6 +351,19 @@ func toDomainScope(scope *providerv1.ConnectionScope) provider.ConnectionScope {
 		Attributes:     scope.GetAttributes(),
 		EndpointRegion: scope.GetEndpointRegion(),
 	}
+}
+
+func toDomainProviderConfig(config *structpb.Struct) map[string]any {
+	if config == nil {
+		return nil
+	}
+
+	values := config.AsMap()
+	if len(values) == 0 {
+		return nil
+	}
+
+	return values
 }
 
 func toDomainCredentials(credentials *providerv1.Credentials) provider.Credentials {

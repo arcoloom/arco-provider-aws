@@ -55,17 +55,22 @@ func (r ec2InstanceLifecycleRunner) Start(ctx context.Context, req provider.Star
 		return provider.StartInstanceResult{}, err
 	}
 
-	amiID, err := resolveAMI(ctx, ec2Client, ssmClient, req)
+	providerConfig, err := parseStartInstanceProviderConfig(req.ProviderConfig)
 	if err != nil {
 		return provider.StartInstanceResult{}, err
 	}
 
-	runConfig, err := resolveRunInstancesConfig(ctx, ec2Client, req, amiID)
+	amiID, err := resolveAMI(ctx, ec2Client, ssmClient, req, providerConfig)
 	if err != nil {
 		return provider.StartInstanceResult{}, err
 	}
 
-	input := buildRunInstancesInput(req, amiID, runConfig)
+	runConfig, err := resolveRunInstancesConfig(ctx, ec2Client, req, amiID, providerConfig)
+	if err != nil {
+		return provider.StartInstanceResult{}, err
+	}
+
+	input := buildRunInstancesInput(req, amiID, runConfig, providerConfig)
 	output, err := ec2Client.RunInstances(ctx, input)
 	if err != nil {
 		return provider.StartInstanceResult{}, fmt.Errorf("run instances for stack %s in region %s: %w", req.StackName, cfg.Region, err)
@@ -169,9 +174,15 @@ func (r ec2InstanceLifecycleRunner) clients(
 	return cfg, r.factory.NewEC2(ec2ClientOptions{Config: cfg, Endpoint: scope.Endpoint}), r.factory.NewSSM(cfg), nil
 }
 
-func resolveAMI(ctx context.Context, ec2Client ec2API, ssmClient ssmAPI, req provider.StartInstanceRequest) (string, error) {
-	if strings.TrimSpace(req.AMI) != "" {
-		return strings.TrimSpace(req.AMI), nil
+func resolveAMI(
+	ctx context.Context,
+	ec2Client ec2API,
+	ssmClient ssmAPI,
+	req provider.StartInstanceRequest,
+	config startInstanceProviderConfig,
+) (string, error) {
+	if strings.TrimSpace(config.AMI) != "" {
+		return strings.TrimSpace(config.AMI), nil
 	}
 
 	architecture, err := defaultAMIArchitecture(ctx, ec2Client, req.InstanceType)
@@ -320,6 +331,7 @@ func buildRunInstancesInput(
 	req provider.StartInstanceRequest,
 	amiID string,
 	runConfig resolvedRunInstancesConfig,
+	config startInstanceProviderConfig,
 ) *ec2.RunInstancesInput {
 	input := &ec2.RunInstancesInput{
 		ImageId:      awsv2.String(amiID),
@@ -371,8 +383,8 @@ func buildRunInstancesInput(
 			},
 		}}
 	}
-	if req.KeyName != "" {
-		input.KeyName = awsv2.String(req.KeyName)
+	if config.KeyName != "" {
+		input.KeyName = awsv2.String(config.KeyName)
 	}
 	if req.UserData != "" {
 		encoded := base64.StdEncoding.EncodeToString([]byte(req.UserData))

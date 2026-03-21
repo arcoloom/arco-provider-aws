@@ -36,6 +36,19 @@ func (s *Server) GetProviderInfo(ctx context.Context, _ *providerv1.GetProviderI
 	}, nil
 }
 
+func (s *Server) GetProviderSchema(ctx context.Context, _ *providerv1.GetProviderSchemaRequest) (*providerv1.GetProviderSchemaResponse, error) {
+	resources, err := s.service.Schema(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Info("provider schema requested", "resources", len(resources))
+
+	return &providerv1.GetProviderSchemaResponse{
+		Resources: toProtoResourceSchemas(resources),
+	}, nil
+}
+
 func (s *Server) ValidateConnection(ctx context.Context, req *providerv1.ValidateConnectionRequest) (*providerv1.ValidateConnectionResponse, error) {
 	domainReq := provider.ValidateConnectionRequest{
 		Context:     toDomainContext(req.GetContext()),
@@ -177,15 +190,12 @@ func (s *Server) StartInstance(ctx context.Context, req *providerv1.StartInstanc
 		InstanceName:     req.GetInstanceName(),
 		Region:           req.GetRegion(),
 		AvailabilityZone: req.GetAvailabilityZone(),
-		AMI:              req.GetAmi(),
 		InstanceType:     req.GetInstanceType(),
 		MarketType:       toDomainInstanceMarketType(req.GetMarketType()),
-		SubnetID:         req.GetSubnetId(),
-		SecurityGroupIDs: req.GetSecurityGroupIds(),
-		KeyName:          req.GetKeyName(),
 		UserData:         req.GetUserData(),
 		Options:          req.GetOptions(),
 		Tags:             toDomainInstanceTags(req.GetTags()),
+		ProviderConfig:   toDomainProviderConfig(req.GetProviderConfig()),
 	}
 
 	result, err := s.service.StartInstance(ctx, domainReq)

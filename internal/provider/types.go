@@ -26,6 +26,34 @@ const (
 	ResourcePlaneNetwork ResourcePlane = "network"
 )
 
+type SchemaAttributeType string
+
+const (
+	SchemaAttributeTypeString     SchemaAttributeType = "string"
+	SchemaAttributeTypeBool       SchemaAttributeType = "bool"
+	SchemaAttributeTypeInt64      SchemaAttributeType = "int64"
+	SchemaAttributeTypeFloat64    SchemaAttributeType = "float64"
+	SchemaAttributeTypeStringList SchemaAttributeType = "string_list"
+	SchemaAttributeTypeStringMap  SchemaAttributeType = "string_map"
+)
+
+type SchemaAttribute struct {
+	Name         string
+	Type         SchemaAttributeType
+	Required     bool
+	Optional     bool
+	Computed     bool
+	Sensitive    bool
+	Description  string
+	DefaultValue any
+}
+
+type ResourceSchema struct {
+	Type        string
+	Description string
+	Attributes  []SchemaAttribute
+}
+
 type Metadata struct {
 	Name              string
 	Version           string
@@ -193,15 +221,12 @@ type StartInstanceRequest struct {
 	InstanceName     string
 	Region           string
 	AvailabilityZone string
-	AMI              string
 	InstanceType     string
 	MarketType       InstanceMarketType
-	SubnetID         string
-	SecurityGroupIDs []string
-	KeyName          string
 	UserData         string
 	Options          map[string]string
 	Tags             []InstanceTag
+	ProviderConfig   map[string]any
 }
 
 type StartInstanceResult struct {
@@ -239,20 +264,19 @@ type ListActiveInstancesRequest struct {
 }
 
 type ActiveInstance struct {
-	InstanceID       string
-	Name             string
-	Region           string
-	AvailabilityZone string
-	InstanceType     string
-	State            string
-	MarketType       InstanceMarketType
-	PublicIP         string
-	PrivateIP        string
-	IPv6Addresses    []string
-	SubnetID         string
-	VPCID            string
-	LaunchTime       time.Time
-	Tags             []InstanceTag
+	InstanceID         string
+	Name               string
+	Region             string
+	AvailabilityZone   string
+	InstanceType       string
+	State              string
+	MarketType         InstanceMarketType
+	PublicIP           string
+	PrivateIP          string
+	IPv6Addresses      []string
+	LaunchTime         time.Time
+	Tags               []InstanceTag
+	ProviderAttributes map[string]string
 }
 
 type ListActiveInstancesResult struct {
@@ -322,9 +346,6 @@ type InstanceTypeInfo struct {
 	NetworkPerformance        string
 	EnhancedNetworking        bool
 	IPv6Supported             bool
-	PlacementGroupSupported   bool
-	VPCOnly                   bool
-	EBSOptimized              bool
 	SupportedRegions          []Region
 	SupportedOperatingSystems []string
 	Accelerators              []Accelerator

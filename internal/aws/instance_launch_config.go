@@ -48,18 +48,17 @@ func resolveRunInstancesConfig(
 	ec2Client ec2API,
 	req provider.StartInstanceRequest,
 	amiID string,
+	config startInstanceProviderConfig,
 ) (resolvedRunInstancesConfig, error) {
-	options, err := parseStartInstanceLaunchOptions(req.Options)
-	if err != nil {
-		return resolvedRunInstancesConfig{}, err
-	}
+	var err error
 
 	result := resolvedRunInstancesConfig{
-		subnetID:          req.SubnetID,
-		securityGroupIDs:  append([]string(nil), req.SecurityGroupIDs...),
-		rootVolumeSizeGiB: options.rootVolumeSizeGiB,
+		subnetID:          config.SubnetID,
+		securityGroupIDs:  append([]string(nil), config.SecurityGroupIDs...),
+		rootVolumeSizeGiB: config.LaunchOptions.rootVolumeSizeGiB,
 	}
 
+	options := config.LaunchOptions
 	needsDefaultVPC := options.useDefaultVPC || options.useDefaultSubnet || (options.useDefaultSecurityGroup && len(result.securityGroupIDs) == 0)
 	defaultVPCID := ""
 	if needsDefaultVPC {

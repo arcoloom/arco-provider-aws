@@ -28,7 +28,7 @@ func TestStartInstanceDelegatesToRunner(t *testing.T) {
 		instanceRunner: runner,
 	}
 
-	result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+		result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
@@ -247,19 +247,21 @@ func TestStartInstanceCreatesEC2InstanceViaAWSSDK(t *testing.T) {
 				AccessKeyID:     "ak",
 				SecretAccessKey: "sk",
 			},
-		},
-		Region:           "us-west-2",
-		StackName:        " stack-a ",
-		InstanceType:     " t3.micro ",
-		Scope:            provider.ConnectionScope{Region: "us-west-2"},
-		SubnetID:         "subnet-123",
-		SecurityGroupIDs: []string{"sg-123"},
-		KeyName:          "demo-key",
-		UserData:         "echo hello",
-		Tags: []provider.InstanceTag{
-			{Key: "Environment", Value: "test"},
-		},
-	})
+			},
+			Region:           "us-west-2",
+			StackName:        " stack-a ",
+			InstanceType:     " t3.micro ",
+			Scope:            provider.ConnectionScope{Region: "us-west-2"},
+			UserData:         "echo hello",
+			Tags: []provider.InstanceTag{
+				{Key: "Environment", Value: "test"},
+			},
+			ProviderConfig: map[string]any{
+				"subnet_id":          "subnet-123",
+				"security_group_ids": []any{"sg-123"},
+				"key_name":           "demo-key",
+			},
+		})
 	if err != nil {
 		t.Fatalf("StartInstance returned error: %v", err)
 	}
@@ -367,26 +369,26 @@ func TestStartInstanceResolvesDefaultNetworkAndRootVolumeFromOptions(t *testing.
 		instanceRunner: newInstanceLifecycleRunner(factory),
 	}
 
-	_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+		_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
 				SecretAccessKey: "sk",
 			},
 		},
-		Region:           "us-east-1",
-		AvailabilityZone: "us-east-1b",
-		StackName:        "stack-spot",
-		InstanceType:     "c7g.medium",
-		MarketType:       provider.InstanceMarketTypeSpot,
-		Options: map[string]string{
-			optionUseDefaultVPC:           "true",
-			optionUseDefaultSecurityGroup: "true",
-			optionAssociatePublicIPv4:     "false",
-			optionAssignPublicIPv6:        "true",
-			optionRootVolumeSizeGiB:       "20",
-		},
-	})
+			Region:           "us-east-1",
+			AvailabilityZone: "us-east-1b",
+			StackName:        "stack-spot",
+			InstanceType:     "c7g.medium",
+			MarketType:       provider.InstanceMarketTypeSpot,
+			ProviderConfig: map[string]any{
+				optionUseDefaultVPC:           true,
+				optionUseDefaultSecurityGroup: true,
+				optionAssociatePublicIPv4:     false,
+				optionAssignPublicIPv6:        true,
+				optionRootVolumeSizeGiB:       int64(20),
+			},
+		})
 	if err != nil {
 		t.Fatalf("StartInstance returned error: %v", err)
 	}

@@ -4,6 +4,7 @@ import "context"
 
 type Service interface {
 	Metadata(context.Context) (Metadata, error)
+	Schema(context.Context) ([]ResourceSchema, error)
 	ValidateConnection(context.Context, ValidateConnectionRequest) (ValidateConnectionResult, error)
 	Ping(context.Context, string) (PingResult, error)
 	ListRegions(context.Context, ListRegionsRequest) (ListRegionsResult, error)

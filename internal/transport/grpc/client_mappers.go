@@ -6,6 +6,7 @@ import (
 
 	providerv1 "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1"
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func toProtoContext(ctx provider.RequestContext) *providerv1.RequestContext {
@@ -24,6 +25,18 @@ func toProtoScope(scope provider.ConnectionScope) *providerv1.ConnectionScope {
 		Attributes:     scope.Attributes,
 		EndpointRegion: scope.EndpointRegion,
 	}
+}
+
+func toProtoProviderConfig(config map[string]any) *structpb.Struct {
+	if len(config) == 0 {
+		return nil
+	}
+
+	protoConfig, err := structpb.NewStruct(config)
+	if err != nil {
+		return nil
+	}
+	return protoConfig
 }
 
 func toProtoCredentials(credentials provider.Credentials) *providerv1.Credentials {
@@ -86,6 +99,67 @@ func toDomainMetadata(metadata *providerv1.ProviderMetadata) provider.Metadata {
 		Capabilities:      metadata.GetCapabilities(),
 		ResourcePlanes:    toDomainResourcePlanes(metadata.GetResourcePlanes()),
 	}
+}
+
+func toDomainResourceSchemas(resources []*providerv1.ProviderResourceSchema) []provider.ResourceSchema {
+	result := make([]provider.ResourceSchema, 0, len(resources))
+	for _, resource := range resources {
+		if resource == nil {
+			continue
+		}
+		result = append(result, provider.ResourceSchema{
+			Type:        resource.GetType(),
+			Description: resource.GetDescription(),
+			Attributes:  toDomainSchemaAttributes(resource.GetAttributes()),
+		})
+	}
+	return result
+}
+
+func toDomainSchemaAttributes(attributes []*providerv1.SchemaAttribute) []provider.SchemaAttribute {
+	result := make([]provider.SchemaAttribute, 0, len(attributes))
+	for _, attribute := range attributes {
+		if attribute == nil {
+			continue
+		}
+		result = append(result, provider.SchemaAttribute{
+			Name:         attribute.GetName(),
+			Type:         toDomainSchemaAttributeType(attribute.GetType()),
+			Required:     attribute.GetRequired(),
+			Optional:     attribute.GetOptional(),
+			Computed:     attribute.GetComputed(),
+			Sensitive:    attribute.GetSensitive(),
+			Description:  attribute.GetDescription(),
+			DefaultValue: toDomainDefaultValue(attribute.GetDefaultValue()),
+		})
+	}
+	return result
+}
+
+func toDomainSchemaAttributeType(value providerv1.SchemaAttributeType) provider.SchemaAttributeType {
+	switch value {
+	case providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_STRING:
+		return provider.SchemaAttributeTypeString
+	case providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_BOOL:
+		return provider.SchemaAttributeTypeBool
+	case providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_INT64:
+		return provider.SchemaAttributeTypeInt64
+	case providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_FLOAT64:
+		return provider.SchemaAttributeTypeFloat64
+	case providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_STRING_LIST:
+		return provider.SchemaAttributeTypeStringList
+	case providerv1.SchemaAttributeType_SCHEMA_ATTRIBUTE_TYPE_STRING_MAP:
+		return provider.SchemaAttributeTypeStringMap
+	default:
+		return ""
+	}
+}
+
+func toDomainDefaultValue(value *structpb.Value) any {
+	if value == nil {
+		return nil
+	}
+	return value.AsInterface()
 }
 
 func toDomainResourcePlanes(values []providerv1.ResourcePlane) []provider.ResourcePlane {
@@ -250,19 +324,18 @@ func toDomainListActiveInstancesResult(resp *providerv1.ListActiveInstancesRespo
 		}
 
 		parsed := provider.ActiveInstance{
-			InstanceID:       item.GetInstanceId(),
-			Name:             item.GetName(),
-			Region:           item.GetRegion(),
-			AvailabilityZone: item.GetAvailabilityZone(),
-			InstanceType:     item.GetInstanceType(),
-			State:            item.GetState(),
-			MarketType:       toDomainInstanceMarketType(item.GetMarketType()),
-			PublicIP:         item.GetPublicIp(),
-			PrivateIP:        item.GetPrivateIp(),
-			IPv6Addresses:    item.GetIpv6Addresses(),
-			SubnetID:         item.GetSubnetId(),
-			VPCID:            item.GetVpcId(),
-			Tags:             toDomainInstanceTags(item.GetTags()),
+			InstanceID:         item.GetInstanceId(),
+			Name:               item.GetName(),
+			Region:             item.GetRegion(),
+			AvailabilityZone:   item.GetAvailabilityZone(),
+			InstanceType:       item.GetInstanceType(),
+			State:              item.GetState(),
+			MarketType:         toDomainInstanceMarketType(item.GetMarketType()),
+			PublicIP:           item.GetPublicIp(),
+			PrivateIP:          item.GetPrivateIp(),
+			IPv6Addresses:      item.GetIpv6Addresses(),
+			Tags:               toDomainInstanceTags(item.GetTags()),
+			ProviderAttributes: item.GetProviderAttributes(),
 		}
 		if timestamp := item.GetLaunchTime(); timestamp != "" {
 			launchTime, err := time.Parse(time.RFC3339, timestamp)
@@ -353,9 +426,6 @@ func toDomainGetInstanceTypeInfoResult(resp *providerv1.GetInstanceTypeInfoRespo
 			NetworkPerformance:        item.GetNetworkPerformance(),
 			EnhancedNetworking:        item.GetEnhancedNetworking(),
 			IPv6Supported:             item.GetIpv6Supported(),
-			PlacementGroupSupported:   item.GetPlacementGroupSupported(),
-			VPCOnly:                   item.GetVpcOnly(),
-			EBSOptimized:              item.GetEbsOptimized(),
 			SupportedRegions:          toDomainRegions(item.GetSupportedRegions()),
 			SupportedOperatingSystems: item.GetSupportedOperatingSystems(),
 			Accelerators:              toDomainAccelerators(item.GetAccelerators()),

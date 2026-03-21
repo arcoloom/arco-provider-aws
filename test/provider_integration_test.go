@@ -65,6 +65,14 @@ func TestProviderProcessLifecycleAndBusinessCalls(t *testing.T) {
 		t.Fatalf("unexpected resource planes: %+v", metadata.ResourcePlanes)
 	}
 
+	schema, err := client.GetProviderSchema(ctx)
+	if err != nil {
+		t.Fatalf("get provider schema: %v", err)
+	}
+	if len(schema) != 1 || schema[0].Type != "compute_instance" {
+		t.Fatalf("unexpected provider schema: %+v", schema)
+	}
+
 	validateResp, err := client.ValidateConnection(ctx, provider.ValidateConnectionRequest{
 		Context: provider.RequestContext{
 			RequestID: "req-validate-001",

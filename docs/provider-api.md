@@ -25,6 +25,7 @@ The current gRPC service definition is:
 ```proto
 service ProviderService {
   rpc GetProviderInfo(GetProviderInfoRequest) returns (GetProviderInfoResponse);
+  rpc GetProviderSchema(GetProviderSchemaRequest) returns (GetProviderSchemaResponse);
   rpc ValidateConnection(ValidateConnectionRequest) returns (ValidateConnectionResponse);
   rpc Ping(PingRequest) returns (PingResponse);
   rpc ListRegions(ListRegionsRequest) returns (ListRegionsResponse);
@@ -32,6 +33,7 @@ service ProviderService {
   rpc GetSpotData(GetSpotDataRequest) returns (GetSpotDataResponse);
   rpc StartInstance(StartInstanceRequest) returns (StartInstanceResponse);
   rpc StopInstance(StopInstanceRequest) returns (StopInstanceResponse);
+  rpc ListActiveInstances(ListActiveInstancesRequest) returns (ListActiveInstancesResponse);
   rpc ListInstanceTypes(ListInstanceTypesRequest) returns (ListInstanceTypesResponse);
   rpc GetInstanceTypeInfo(GetInstanceTypeInfoRequest) returns (GetInstanceTypeInfoResponse);
   rpc GetInstancePrices(GetInstancePricesRequest) returns (GetInstancePricesResponse);
@@ -427,15 +429,12 @@ Request: `StartInstanceRequest`
 | `instance_name` | `string` | No | Instance name. Defaults to `stack_name` when omitted. |
 | `region` | `string` | No | Target region. |
 | `availability_zone` | `string` | No | Target availability zone. |
-| `ami` | `string` | No | Image or template identifier. The field name follows the current proto. |
 | `instance_type` | `string` | Yes | Instance type. |
 | `market_type` | `InstanceMarketType` | No | Capacity purchase model. |
-| `subnet_id` | `string` | No | Network subnet identifier. |
-| `security_group_ids` | `repeated string` | No | Network policy or security group identifiers. |
-| `key_name` | `string` | No | Access key pair name. |
 | `user_data` | `string` | No | Bootstrap script or initialization data. |
-| `options` | `map<string,string>` | No | Provider-specific extension options. |
+| `options` | `map<string,string>` | No | Generic request options such as dry-run flags. |
 | `tags` | `repeated InstanceTag` | No | Resource tags. |
+| `provider_config` | `google.protobuf.Struct` | No | Provider-defined attributes. The caller should discover supported keys and types through `GetProviderSchema`. |
 
 Response: `StartInstanceResponse`
 
@@ -453,8 +452,9 @@ Current sample behavior:
 - `region` must be supplied explicitly for `StartInstance`. The provider does not fall back to `scope.region` or a default region.
 - If `market_type` is empty, it defaults to `INSTANCE_MARKET_TYPE_ON_DEMAND`.
 - If `instance_name` is empty, the provider defaults it to `stack_name`.
-- If `ami` is empty, the provider resolves the latest Debian 13 AMI from Debian's public SSM parameters based on the instance architecture.
+- If `provider_config.ami` is empty, the provider resolves the latest Debian 13 AMI from Debian's public SSM parameters based on the instance architecture.
 - The current implementation validates that `stack_name` and `instance_type` are non-empty.
+- AWS-specific launch attributes such as `ami`, `subnet_id`, `security_group_ids`, `key_name`, and the default-network toggles now live under `provider_config`.
 
 ### 4.8 `StopInstance`
 
@@ -752,12 +752,14 @@ grpcurl \
     },
     "stackName": "demo-stack",
     "instanceName": "demo-instance",
-    "ami": "<image-id>",
     "instanceType": "demo.medium",
     "marketType": "INSTANCE_MARKET_TYPE_ON_DEMAND",
-    "subnetId": "<subnet-id>",
-    "securityGroupIds": ["<group-id>"],
-    "keyName": "<key-name>",
+    "providerConfig": {
+      "ami": "<image-id>",
+      "subnet_id": "<subnet-id>",
+      "security_group_ids": ["<group-id>"],
+      "key_name": "<key-name>"
+    },
     "tags": [
       {"key": "env", "value": "dev"}
     ]
@@ -770,7 +772,7 @@ Notes:
 
 - JSON payloads use protobuf JSON camelCase field names such as `requestId`, `stackName`, and `instanceType`.
 - The `credentials` example uses the credential field names built into the current proto; hosts should select the right shape from `supported_auth_schemes`.
-- The `ami` field name also follows the current proto; in generic terms, it can be interpreted as an image or template identifier.
+- `providerConfig` is intentionally provider-defined; callers should prefer `GetProviderSchema` over hard-coding attribute names.
 
 ## 6. Integration Guidance
 
@@ -794,13 +796,13 @@ To set expectations for the example implementation in this repository:
 
 - `GetProviderInfo` is implemented and returns provider metadata, auth schemes, and capability declarations.
 - `Ping` is implemented and returns `pong:<payload>` with the current UTC time.
+- `GetProviderSchema` is implemented and returns provider-defined resource attributes for `compute_instance`.
 - `ValidateConnection` is implemented and validates STS caller identity plus regional EC2 read access.
 - `ListRegions` and `ListAvailabilityZones` are implemented and expose live account location discovery.
 - `ListInstanceTypes`, `GetInstanceTypeInfo`, and `GetInstancePrices` are implemented and suitable for catalog and pricing flows.
-- `StartInstance` and `StopInstance` are implemented, but some field names still reflect historical proto naming.
+- `StartInstance` and `StopInstance` are implemented. AWS-specific launch attributes are carried through provider-defined `provider_config` instead of the shared request surface.
 
 If this contract evolves into a fully cloud-neutral provider protocol, these areas are good candidates for further neutralization:
 
-- Image identifier fields, for example replacing `ami` with a neutral name such as `image_id`.
 - Credential oneof names and enums, so vendor names are not embedded in the base protocol layer.
-- Network-related field names, so they can cover a broader range of private networking and security policy models.
+- Resource schemas and CRUD surfaces, so more provider-specific state can be discovered dynamically rather than modeled in the shared proto.

@@ -328,21 +328,30 @@ func matchesTagFilters(tags []ec2types.Tag, requested []provider.InstanceTag) bo
 
 func buildActiveInstance(region string, instance ec2types.Instance) provider.ActiveInstance {
 	tags := toProviderInstanceTags(instance.Tags)
+	providerAttributes := map[string]string{}
+	if subnetID := strings.TrimSpace(awsv2.ToString(instance.SubnetId)); subnetID != "" {
+		providerAttributes[providerAttributeSubnetID] = subnetID
+	}
+	if vpcID := strings.TrimSpace(awsv2.ToString(instance.VpcId)); vpcID != "" {
+		providerAttributes[providerAttributeVPCID] = vpcID
+	}
+	if len(providerAttributes) == 0 {
+		providerAttributes = nil
+	}
 	return provider.ActiveInstance{
-		InstanceID:       strings.TrimSpace(awsv2.ToString(instance.InstanceId)),
-		Name:             activeInstanceName(tags),
-		Region:           region,
-		AvailabilityZone: strings.TrimSpace(awsv2.ToString(instance.Placement.AvailabilityZone)),
-		InstanceType:     strings.TrimSpace(string(instance.InstanceType)),
-		State:            string(instanceStateName(instance)),
-		MarketType:       marketTypeFromInstance(instance),
-		PublicIP:         strings.TrimSpace(awsv2.ToString(instance.PublicIpAddress)),
-		PrivateIP:        strings.TrimSpace(awsv2.ToString(instance.PrivateIpAddress)),
-		IPv6Addresses:    instanceIPv6Addresses(instance),
-		SubnetID:         strings.TrimSpace(awsv2.ToString(instance.SubnetId)),
-		VPCID:            strings.TrimSpace(awsv2.ToString(instance.VpcId)),
-		LaunchTime:       awsv2.ToTime(instance.LaunchTime),
-		Tags:             tags,
+		InstanceID:         strings.TrimSpace(awsv2.ToString(instance.InstanceId)),
+		Name:               activeInstanceName(tags),
+		Region:             region,
+		AvailabilityZone:   strings.TrimSpace(awsv2.ToString(instance.Placement.AvailabilityZone)),
+		InstanceType:       strings.TrimSpace(string(instance.InstanceType)),
+		State:              string(instanceStateName(instance)),
+		MarketType:         marketTypeFromInstance(instance),
+		PublicIP:           strings.TrimSpace(awsv2.ToString(instance.PublicIpAddress)),
+		PrivateIP:          strings.TrimSpace(awsv2.ToString(instance.PrivateIpAddress)),
+		IPv6Addresses:      instanceIPv6Addresses(instance),
+		LaunchTime:         awsv2.ToTime(instance.LaunchTime),
+		Tags:               tags,
+		ProviderAttributes: providerAttributes,
 	}
 }
 

@@ -39,12 +39,17 @@ func (s *Service) Metadata(context.Context) (provider.Metadata, error) {
 		SupportedAuth:     []provider.AuthScheme{provider.AuthSchemeAWSIAM},
 		SupportedServices: []string{"location", "spot", "compute", "catalog", "pricing"},
 		Capabilities: map[string]string{
-			"transport":  "grpc",
-			"runtime":    "provider",
-			"extensible": "true",
+			"transport":   "grpc",
+			"runtime":     "provider",
+			"extensible":  "true",
+			"schema_mode": "provider-defined",
 		},
 		ResourcePlanes: []provider.ResourcePlane{provider.ResourcePlaneCompute},
 	}, nil
+}
+
+func (s *Service) Schema(context.Context) ([]provider.ResourceSchema, error) {
+	return []provider.ResourceSchema{awsComputeInstanceSchema()}, nil
 }
 
 const warningCodeRegionValidationSkipped = "REGION_VALIDATION_SKIPPED"

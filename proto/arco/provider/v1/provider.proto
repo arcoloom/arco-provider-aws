@@ -2,10 +2,13 @@ syntax = "proto3";
 
 package arco.provider.v1;
 
+import "google/protobuf/struct.proto";
+
 option go_package = "github.com/arcoloom/arco-provider-aws/gen/proto/arco/provider/v1;providerv1";
 
 service ProviderService {
   rpc GetProviderInfo(GetProviderInfoRequest) returns (GetProviderInfoResponse);
+  rpc GetProviderSchema(GetProviderSchemaRequest) returns (GetProviderSchemaResponse);
   rpc ValidateConnection(ValidateConnectionRequest) returns (ValidateConnectionResponse);
   rpc Ping(PingRequest) returns (PingResponse);
   rpc ListRegions(ListRegionsRequest) returns (ListRegionsResponse);
@@ -38,6 +41,33 @@ enum ResourcePlane {
   RESOURCE_PLANE_COMPUTE = 1;
   RESOURCE_PLANE_STORAGE = 2;
   RESOURCE_PLANE_NETWORK = 3;
+}
+
+enum SchemaAttributeType {
+  SCHEMA_ATTRIBUTE_TYPE_UNSPECIFIED = 0;
+  SCHEMA_ATTRIBUTE_TYPE_STRING = 1;
+  SCHEMA_ATTRIBUTE_TYPE_BOOL = 2;
+  SCHEMA_ATTRIBUTE_TYPE_INT64 = 3;
+  SCHEMA_ATTRIBUTE_TYPE_FLOAT64 = 4;
+  SCHEMA_ATTRIBUTE_TYPE_STRING_LIST = 5;
+  SCHEMA_ATTRIBUTE_TYPE_STRING_MAP = 6;
+}
+
+message SchemaAttribute {
+  string name = 1;
+  SchemaAttributeType type = 2;
+  bool required = 3;
+  bool optional = 4;
+  bool computed = 5;
+  bool sensitive = 6;
+  string description = 7;
+  google.protobuf.Value default_value = 8;
+}
+
+message ProviderResourceSchema {
+  string type = 1;
+  string description = 2;
+  repeated SchemaAttribute attributes = 3;
 }
 
 message RequestContext {
@@ -103,6 +133,12 @@ message GetProviderInfoRequest {}
 
 message GetProviderInfoResponse {
   ProviderMetadata metadata = 1;
+}
+
+message GetProviderSchemaRequest {}
+
+message GetProviderSchemaResponse {
+  repeated ProviderResourceSchema resources = 1;
 }
 
 message ValidateConnectionRequest {
@@ -207,15 +243,12 @@ message StartInstanceRequest {
   string instance_name = 5;
   string region = 6;
   string availability_zone = 7;
-  string ami = 8;
-  string instance_type = 9;
-  InstanceMarketType market_type = 10;
-  string subnet_id = 11;
-  repeated string security_group_ids = 12;
-  string key_name = 13;
-  string user_data = 14;
-  map<string, string> options = 15;
-  repeated InstanceTag tags = 16;
+  string instance_type = 8;
+  InstanceMarketType market_type = 9;
+  string user_data = 10;
+  map<string, string> options = 11;
+  repeated InstanceTag tags = 12;
+  google.protobuf.Struct provider_config = 13;
 }
 
 message StartInstanceResponse {
@@ -263,10 +296,9 @@ message ActiveInstance {
   string public_ip = 8;
   string private_ip = 9;
   repeated string ipv6_addresses = 10;
-  string subnet_id = 11;
-  string vpc_id = 12;
-  string launch_time = 13;
-  repeated InstanceTag tags = 14;
+  string launch_time = 11;
+  repeated InstanceTag tags = 12;
+  map<string, string> provider_attributes = 13;
 }
 
 message ListActiveInstancesResponse {
@@ -347,14 +379,11 @@ message InstanceTypeInfo {
   string network_performance = 13;
   bool enhanced_networking = 14;
   bool ipv6_supported = 15;
-  bool placement_group_supported = 16;
-  bool vpc_only = 17;
-  bool ebs_optimized = 18;
-  repeated CloudRegion supported_regions = 19;
-  repeated string supported_operating_systems = 20;
-  repeated Accelerator accelerators = 21;
-  LocalStorage local_storage = 22;
-  map<string, string> attributes = 23;
+  repeated CloudRegion supported_regions = 16;
+  repeated string supported_operating_systems = 17;
+  repeated Accelerator accelerators = 18;
+  LocalStorage local_storage = 19;
+  map<string, string> attributes = 20;
 }
 
 message InstancePrice {
