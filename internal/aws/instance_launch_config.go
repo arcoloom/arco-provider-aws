@@ -59,38 +59,27 @@ func resolveRunInstancesConfig(
 	}
 
 	options := config.LaunchOptions
-	needsDefaultVPC := options.useDefaultVPC || options.useDefaultSubnet || (options.useDefaultSecurityGroup && len(result.securityGroupIDs) == 0)
-	defaultVPCID := ""
-	if needsDefaultVPC {
-		defaultVPCID, err = resolveDefaultVPCID(ctx, ec2Client, req.Region)
-		if err != nil {
-			return resolvedRunInstancesConfig{}, err
-		}
-	}
-
 	needsIPv6 := options.ipv6AddressCount > 0
 	needsNetworkInterface := options.hasAssociatePublicIPv4 || needsIPv6
-
-	if result.subnetID == "" && (options.useDefaultSubnet || needsNetworkInterface) {
-		if defaultVPCID == "" {
-			defaultVPCID, err = resolveDefaultVPCID(ctx, ec2Client, req.Region)
-			if err != nil {
-				return resolvedRunInstancesConfig{}, err
-			}
-		}
-
-		result.subnetID, err = resolveDefaultSubnetID(ctx, ec2Client, req.Region, defaultVPCID, req.AvailabilityZone, needsIPv6)
+	needsManagedNetwork := result.subnetID == "" && (options.useDefaultVPC || options.useDefaultSubnet || needsNetworkInterface || len(result.securityGroupIDs) == 0)
+	sharedNetwork := managedNetwork{}
+	if needsManagedNetwork {
+		sharedNetwork, err = ensureManagedNetwork(ctx, ec2Client, req.Region, req.AvailabilityZone)
 		if err != nil {
 			return resolvedRunInstancesConfig{}, err
 		}
 	}
 
-	if len(result.securityGroupIDs) == 0 && options.useDefaultSecurityGroup {
-		if defaultVPCID == "" {
-			defaultVPCID, err = resolveDefaultVPCID(ctx, ec2Client, req.Region)
-			if err != nil {
-				return resolvedRunInstancesConfig{}, err
-			}
+	if result.subnetID == "" && sharedNetwork.subnetID != "" {
+		result.subnetID = sharedNetwork.subnetID
+	}
+
+	if len(result.securityGroupIDs) == 0 && sharedNetwork.securityGroupID != "" {
+		result.securityGroupIDs = []string{sharedNetwork.securityGroupID}
+	} else if len(result.securityGroupIDs) == 0 && options.useDefaultSecurityGroup {
+		defaultVPCID, err := resolveDefaultVPCID(ctx, ec2Client, req.Region)
+		if err != nil {
+			return resolvedRunInstancesConfig{}, err
 		}
 
 		defaultSecurityGroupID, err := resolveDefaultSecurityGroupID(ctx, ec2Client, req.Region, defaultVPCID)
@@ -360,7 +349,10 @@ func resolveRootDeviceName(ctx context.Context, ec2Client ec2API, amiID string) 
 
 func subnetSupportsIPv6(subnet ec2types.Subnet) bool {
 	for _, association := range subnet.Ipv6CidrBlockAssociationSet {
-		state := normalizeToken(string(association.Ipv6CidrBlockState.State))
+		state := ""
+		if association.Ipv6CidrBlockState != nil {
+			state = normalizeToken(string(association.Ipv6CidrBlockState.State))
+		}
 		if state == "" || state == "associated" {
 			return true
 		}

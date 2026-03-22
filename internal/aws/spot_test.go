@@ -262,11 +262,57 @@ type fakeEC2Client struct {
 	availabilityZonesErr        error
 	imagesOutput                *ec2.DescribeImagesOutput
 	instanceTypeOfferingsOutput *ec2.DescribeInstanceTypeOfferingsOutput
+	internetGatewaysOutput      *ec2.DescribeInternetGatewaysOutput
+	routeTablesOutput           *ec2.DescribeRouteTablesOutput
 	securityGroupsOutput        *ec2.DescribeSecurityGroupsOutput
 	spotPriceHistoryOutput      *ec2.DescribeSpotPriceHistoryOutput
 	spotPlacementScoresOutput   map[string]*ec2.GetSpotPlacementScoresOutput
 	subnetsOutput               *ec2.DescribeSubnetsOutput
 	vpcsOutput                  *ec2.DescribeVpcsOutput
+}
+
+func (f fakeEC2Client) AssociateRouteTable(context.Context, *ec2.AssociateRouteTableInput, ...func(*ec2.Options)) (*ec2.AssociateRouteTableOutput, error) {
+	return &ec2.AssociateRouteTableOutput{}, nil
+}
+
+func (f fakeEC2Client) AssociateSubnetCidrBlock(context.Context, *ec2.AssociateSubnetCidrBlockInput, ...func(*ec2.Options)) (*ec2.AssociateSubnetCidrBlockOutput, error) {
+	return &ec2.AssociateSubnetCidrBlockOutput{}, nil
+}
+
+func (f fakeEC2Client) AssociateVpcCidrBlock(context.Context, *ec2.AssociateVpcCidrBlockInput, ...func(*ec2.Options)) (*ec2.AssociateVpcCidrBlockOutput, error) {
+	return &ec2.AssociateVpcCidrBlockOutput{}, nil
+}
+
+func (f fakeEC2Client) AttachInternetGateway(context.Context, *ec2.AttachInternetGatewayInput, ...func(*ec2.Options)) (*ec2.AttachInternetGatewayOutput, error) {
+	return &ec2.AttachInternetGatewayOutput{}, nil
+}
+
+func (f fakeEC2Client) AuthorizeSecurityGroupEgress(context.Context, *ec2.AuthorizeSecurityGroupEgressInput, ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
+	return &ec2.AuthorizeSecurityGroupEgressOutput{}, nil
+}
+
+func (f fakeEC2Client) CreateInternetGateway(context.Context, *ec2.CreateInternetGatewayInput, ...func(*ec2.Options)) (*ec2.CreateInternetGatewayOutput, error) {
+	return &ec2.CreateInternetGatewayOutput{}, nil
+}
+
+func (f fakeEC2Client) CreateRoute(context.Context, *ec2.CreateRouteInput, ...func(*ec2.Options)) (*ec2.CreateRouteOutput, error) {
+	return &ec2.CreateRouteOutput{}, nil
+}
+
+func (f fakeEC2Client) CreateRouteTable(context.Context, *ec2.CreateRouteTableInput, ...func(*ec2.Options)) (*ec2.CreateRouteTableOutput, error) {
+	return &ec2.CreateRouteTableOutput{}, nil
+}
+
+func (f fakeEC2Client) CreateSecurityGroup(context.Context, *ec2.CreateSecurityGroupInput, ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
+	return &ec2.CreateSecurityGroupOutput{}, nil
+}
+
+func (f fakeEC2Client) CreateSubnet(context.Context, *ec2.CreateSubnetInput, ...func(*ec2.Options)) (*ec2.CreateSubnetOutput, error) {
+	return &ec2.CreateSubnetOutput{}, nil
+}
+
+func (f fakeEC2Client) CreateVpc(context.Context, *ec2.CreateVpcInput, ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error) {
+	return &ec2.CreateVpcOutput{}, nil
 }
 
 func (f fakeEC2Client) DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error) {
@@ -304,8 +350,22 @@ func (f fakeEC2Client) DescribeImages(context.Context, *ec2.DescribeImagesInput,
 	return f.imagesOutput, nil
 }
 
+func (f fakeEC2Client) DescribeInternetGateways(context.Context, *ec2.DescribeInternetGatewaysInput, ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
+	if f.internetGatewaysOutput == nil {
+		return &ec2.DescribeInternetGatewaysOutput{}, nil
+	}
+	return f.internetGatewaysOutput, nil
+}
+
 func (f fakeEC2Client) DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 	return &ec2.DescribeInstancesOutput{}, nil
+}
+
+func (f fakeEC2Client) DescribeRouteTables(context.Context, *ec2.DescribeRouteTablesInput, ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+	if f.routeTablesOutput == nil {
+		return &ec2.DescribeRouteTablesOutput{}, nil
+	}
+	return f.routeTablesOutput, nil
 }
 
 func (f fakeEC2Client) DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
@@ -351,6 +411,18 @@ func (f fakeEC2Client) GetSpotPlacementScores(_ context.Context, input *ec2.GetS
 
 func (f fakeEC2Client) RunInstances(context.Context, *ec2.RunInstancesInput, ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
 	return &ec2.RunInstancesOutput{}, nil
+}
+
+func (f fakeEC2Client) ModifySubnetAttribute(context.Context, *ec2.ModifySubnetAttributeInput, ...func(*ec2.Options)) (*ec2.ModifySubnetAttributeOutput, error) {
+	return &ec2.ModifySubnetAttributeOutput{}, nil
+}
+
+func (f fakeEC2Client) ModifyVpcAttribute(context.Context, *ec2.ModifyVpcAttributeInput, ...func(*ec2.Options)) (*ec2.ModifyVpcAttributeOutput, error) {
+	return &ec2.ModifyVpcAttributeOutput{}, nil
+}
+
+func (f fakeEC2Client) RevokeSecurityGroupIngress(context.Context, *ec2.RevokeSecurityGroupIngressInput, ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+	return &ec2.RevokeSecurityGroupIngressOutput{}, nil
 }
 
 func (f fakeEC2Client) TerminateInstances(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {

@@ -308,14 +308,57 @@ func TestStartInstanceResolvesDefaultNetworkAndRootVolumeFromOptions(t *testing.
 		fakeEC2Client: fakeEC2Client{
 			vpcsOutput: &ec2.DescribeVpcsOutput{
 				Vpcs: []ec2types.Vpc{
-					{VpcId: awsv2.String("vpc-default")},
+					{
+						VpcId: awsv2.String("vpc-default"),
+						Ipv6CidrBlockAssociationSet: []ec2types.VpcIpv6CidrBlockAssociation{
+							{Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/56")},
+						},
+					},
+				},
+			},
+			internetGatewaysOutput: &ec2.DescribeInternetGatewaysOutput{
+				InternetGateways: []ec2types.InternetGateway{
+					{
+						InternetGatewayId: awsv2.String("igw-default"),
+						Attachments: []ec2types.InternetGatewayAttachment{
+							{
+								VpcId: awsv2.String("vpc-default"),
+								State: ec2types.AttachmentStatusAttached,
+							},
+						},
+					},
+				},
+			},
+			routeTablesOutput: &ec2.DescribeRouteTablesOutput{
+				RouteTables: []ec2types.RouteTable{
+					{
+						RouteTableId: awsv2.String("rtb-default"),
+						Routes: []ec2types.Route{
+							{
+								DestinationCidrBlock: awsv2.String("0.0.0.0/0"),
+								GatewayId:            awsv2.String("igw-default"),
+							},
+							{
+								DestinationIpv6CidrBlock: awsv2.String("::/0"),
+								GatewayId:                awsv2.String("igw-default"),
+							},
+						},
+						Associations: []ec2types.RouteTableAssociation{
+							{
+								SubnetId: awsv2.String("subnet-ipv6"),
+							},
+						},
+					},
 				},
 			},
 			subnetsOutput: &ec2.DescribeSubnetsOutput{
 				Subnets: []ec2types.Subnet{
 					{
-						SubnetId:         awsv2.String("subnet-ipv6"),
-						AvailabilityZone: awsv2.String("us-east-1b"),
+						SubnetId:                    awsv2.String("subnet-ipv6"),
+						AvailabilityZone:            awsv2.String("us-east-1b"),
+						CidrBlock:                   awsv2.String("10.77.0.0/24"),
+						MapPublicIpOnLaunch:         awsv2.Bool(true),
+						AssignIpv6AddressOnCreation: awsv2.Bool(true),
 						Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
 							{
 								Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
@@ -444,6 +487,212 @@ func TestStartInstanceResolvesDefaultNetworkAndRootVolumeFromOptions(t *testing.
 	if ec2Client.runInstancesInput.InstanceMarketOptions == nil || ec2Client.runInstancesInput.InstanceMarketOptions.MarketType != ec2types.MarketTypeSpot {
 		t.Fatalf("expected spot market options, got %+v", ec2Client.runInstancesInput.InstanceMarketOptions)
 	}
+	if ec2Client.createVpcInput != nil || ec2Client.createInternetGatewayInput != nil || ec2Client.createRouteTableInput != nil || ec2Client.createSubnetInput != nil || ec2Client.createSecurityGroupInput != nil {
+		t.Fatalf("expected managed network resources to be reused, got creates vpc=%+v igw=%+v routeTable=%+v subnet=%+v sg=%+v", ec2Client.createVpcInput, ec2Client.createInternetGatewayInput, ec2Client.createRouteTableInput, ec2Client.createSubnetInput, ec2Client.createSecurityGroupInput)
+	}
+}
+
+func TestStartInstanceCreatesManagedNetworkWhenMissing(t *testing.T) {
+	ec2Client := &recordingEC2Client{
+		fakeEC2Client: fakeEC2Client{
+			vpcsOutput:             &ec2.DescribeVpcsOutput{},
+			internetGatewaysOutput: &ec2.DescribeInternetGatewaysOutput{},
+			routeTablesOutput:      &ec2.DescribeRouteTablesOutput{},
+			subnetsOutput:          &ec2.DescribeSubnetsOutput{},
+			securityGroupsOutput:   &ec2.DescribeSecurityGroupsOutput{},
+		},
+		createVpcOutput: &ec2.CreateVpcOutput{
+			Vpc: &ec2types.Vpc{
+				VpcId: awsv2.String("vpc-arco"),
+				Ipv6CidrBlockAssociationSet: []ec2types.VpcIpv6CidrBlockAssociation{
+					{Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/56")},
+				},
+			},
+		},
+		createInternetGatewayOutput: &ec2.CreateInternetGatewayOutput{
+			InternetGateway: &ec2types.InternetGateway{
+				InternetGatewayId: awsv2.String("igw-arco"),
+			},
+		},
+		createRouteTableOutput: &ec2.CreateRouteTableOutput{
+			RouteTable: &ec2types.RouteTable{
+				RouteTableId: awsv2.String("rtb-arco"),
+			},
+		},
+		createSubnetOutput: &ec2.CreateSubnetOutput{
+			Subnet: &ec2types.Subnet{
+				SubnetId:                    awsv2.String("subnet-arco"),
+				AvailabilityZone:            awsv2.String("us-west-1d"),
+				CidrBlock:                   awsv2.String("10.77.0.0/24"),
+				MapPublicIpOnLaunch:         awsv2.Bool(false),
+				AssignIpv6AddressOnCreation: awsv2.Bool(false),
+				Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
+					{
+						Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/64"),
+						Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
+							State: ec2types.SubnetCidrBlockStateCodeAssociated,
+						},
+					},
+				},
+			},
+		},
+		createSecurityGroupOutput: &ec2.CreateSecurityGroupOutput{
+			GroupId: awsv2.String("sg-arco"),
+		},
+		describeInstanceTypesOutput: &ec2.DescribeInstanceTypesOutput{
+			InstanceTypes: []ec2types.InstanceTypeInfo{
+				{
+					ProcessorInfo: &ec2types.ProcessorInfo{
+						SupportedArchitectures: []ec2types.ArchitectureType{ec2types.ArchitectureTypeX8664},
+					},
+				},
+			},
+		},
+		runInstancesOutput: &ec2.RunInstancesOutput{
+			Instances: []ec2types.Instance{
+				{InstanceId: awsv2.String("i-arco")},
+			},
+		},
+	}
+	ssmClient := &recordingSSMClient{
+		pathOutput: &ssm.GetParametersByPathOutput{
+			Parameters: []ssmtypes.Parameter{
+				{
+					Name:  awsv2.String("/aws/service/debian/release/13/latest/amd64/ami-id"),
+					Value: awsv2.String("ami-arco"),
+				},
+			},
+		},
+	}
+	factory := instanceTestClientFactory{
+		ec2Client: ec2Client,
+		ssmClient: ssmClient,
+	}
+	service := &Service{
+		version:        "test",
+		clientFactory:  factory,
+		instanceRunner: newInstanceLifecycleRunner(factory),
+	}
+
+	_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
+		Region:           "us-west-1",
+		AvailabilityZone: "us-west-1d",
+		StackName:        "stack-shared",
+		InstanceType:     "c7i.large",
+	})
+	if err != nil {
+		t.Fatalf("StartInstance returned error: %v", err)
+	}
+
+	if ec2Client.createVpcInput == nil {
+		t.Fatal("expected managed vpc to be created")
+	}
+	if got := awsv2.ToString(ec2Client.createVpcInput.CidrBlock); got != managedNetworkVPCCIDR {
+		t.Fatalf("unexpected managed vpc cidr: %q", got)
+	}
+	if tags := toTagMap(ec2Client.createVpcInput.TagSpecifications); tags["Name"] != managedNetworkVPCName {
+		t.Fatalf("unexpected managed vpc tags: %+v", tags)
+	}
+	if ec2Client.attachInternetGatewayInput == nil || awsv2.ToString(ec2Client.attachInternetGatewayInput.VpcId) != "vpc-arco" {
+		t.Fatalf("expected internet gateway attachment to vpc-arco, got %+v", ec2Client.attachInternetGatewayInput)
+	}
+	if ec2Client.createRouteTableInput == nil || awsv2.ToString(ec2Client.createRouteTableInput.VpcId) != "vpc-arco" {
+		t.Fatalf("expected managed route table for vpc-arco, got %+v", ec2Client.createRouteTableInput)
+	}
+	if len(ec2Client.createRouteInputs) != 2 {
+		t.Fatalf("expected ipv4 and ipv6 default routes, got %+v", ec2Client.createRouteInputs)
+	}
+	if ec2Client.createSubnetInput == nil {
+		t.Fatal("expected managed subnet to be created")
+	}
+	if got := awsv2.ToString(ec2Client.createSubnetInput.AvailabilityZone); got != "us-west-1d" {
+		t.Fatalf("unexpected managed subnet availability zone: %q", got)
+	}
+	if tags := toTagMap(ec2Client.createSubnetInput.TagSpecifications); tags["Name"] != managedNetworkSubnetName {
+		t.Fatalf("unexpected managed subnet tags: %+v", tags)
+	}
+	if ec2Client.createSecurityGroupInput == nil {
+		t.Fatal("expected managed security group to be created")
+	}
+	if got := awsv2.ToString(ec2Client.createSecurityGroupInput.GroupName); got != managedNetworkSecurityGroupName {
+		t.Fatalf("unexpected managed security group name: %q", got)
+	}
+	if got := len(ec2Client.modifyVpcAttributeInputs); got != 2 {
+		t.Fatalf("expected dns support and hostnames to be enabled on the managed vpc, got %d calls", got)
+	}
+	if got := len(ec2Client.modifySubnetAttributeInputs); got != 2 {
+		t.Fatalf("expected public ipv4 and ipv6 auto-assignment to be enabled on the managed subnet, got %d calls", got)
+	}
+	if ec2Client.runInstancesInput == nil {
+		t.Fatal("expected RunInstances to be called")
+	}
+	if got := awsv2.ToString(ec2Client.runInstancesInput.SubnetId); got != "subnet-arco" {
+		t.Fatalf("unexpected run subnet id: %q", got)
+	}
+	if got := ec2Client.runInstancesInput.SecurityGroupIds; len(got) != 1 || got[0] != "sg-arco" {
+		t.Fatalf("unexpected run security groups: %+v", got)
+	}
+	if ec2Client.runInstancesInput.Placement == nil || awsv2.ToString(ec2Client.runInstancesInput.Placement.AvailabilityZone) != "us-west-1d" {
+		t.Fatalf("unexpected instance placement: %+v", ec2Client.runInstancesInput.Placement)
+	}
+}
+
+func TestEnsureManagedSecurityGroupEnforcesOutboundOnly(t *testing.T) {
+	ec2Client := &recordingEC2Client{
+		fakeEC2Client: fakeEC2Client{
+			securityGroupsOutput: &ec2.DescribeSecurityGroupsOutput{
+				SecurityGroups: []ec2types.SecurityGroup{
+					{
+						GroupId:   awsv2.String("sg-arco"),
+						GroupName: awsv2.String(managedNetworkSecurityGroupName),
+						VpcId:     awsv2.String("vpc-arco"),
+						IpPermissions: []ec2types.IpPermission{
+							{
+								IpProtocol: awsv2.String("tcp"),
+								FromPort:   awsv2.Int32(22),
+								ToPort:     awsv2.Int32(22),
+								IpRanges: []ec2types.IpRange{
+									{CidrIp: awsv2.String("0.0.0.0/0")},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	securityGroup, err := ensureManagedSecurityGroup(context.Background(), ec2Client, "us-west-1", "vpc-arco")
+	if err != nil {
+		t.Fatalf("ensureManagedSecurityGroup() error = %v", err)
+	}
+	if got := awsv2.ToString(securityGroup.GroupId); got != "sg-arco" {
+		t.Fatalf("unexpected managed security group id: %q", got)
+	}
+	if ec2Client.revokeSecurityGroupIngressInput == nil {
+		t.Fatal("expected ingress rules to be revoked")
+	}
+	if got := len(ec2Client.revokeSecurityGroupIngressInput.IpPermissions); got != 1 {
+		t.Fatalf("expected a single ingress rule revoke, got %d", got)
+	}
+	if ec2Client.authorizeSecurityGroupEgressInput == nil {
+		t.Fatal("expected outbound rules to be authorized")
+	}
+	if got := len(ec2Client.authorizeSecurityGroupEgressInput.IpPermissions); got != 2 {
+		t.Fatalf("expected ipv4 and ipv6 outbound rules, got %d", got)
+	}
+	if !containsEgressCIDR(ec2Client.authorizeSecurityGroupEgressInput.IpPermissions, "0.0.0.0/0", "") {
+		t.Fatalf("expected ipv4 egress rule, got %+v", ec2Client.authorizeSecurityGroupEgressInput.IpPermissions)
+	}
+	if !containsEgressCIDR(ec2Client.authorizeSecurityGroupEgressInput.IpPermissions, "", "::/0") {
+		t.Fatalf("expected ipv6 egress rule, got %+v", ec2Client.authorizeSecurityGroupEgressInput.IpPermissions)
+	}
 }
 
 func TestResolveDebian13AMIPrefersMatchingArchitecture(t *testing.T) {
@@ -559,16 +808,177 @@ func (f instanceTestClientFactory) NewSTS(awsv2.Config) stsAPI {
 
 type recordingEC2Client struct {
 	fakeEC2Client
-	describeInstanceTypesOutput *ec2.DescribeInstanceTypesOutput
-	describeInstanceTypesErr    error
-	runInstancesInput           *ec2.RunInstancesInput
-	runInstancesOutput          *ec2.RunInstancesOutput
-	runInstancesErr             error
-	describeInstancesOutput     *ec2.DescribeInstancesOutput
-	describeInstancesErr        error
-	terminateInstancesInput     *ec2.TerminateInstancesInput
-	terminateInstancesOutput    *ec2.TerminateInstancesOutput
-	terminateInstancesErr       error
+	associateRouteTableInput           *ec2.AssociateRouteTableInput
+	associateRouteTableOutput          *ec2.AssociateRouteTableOutput
+	associateRouteTableErr             error
+	associateSubnetCidrBlockInput      *ec2.AssociateSubnetCidrBlockInput
+	associateSubnetCidrBlockOutput     *ec2.AssociateSubnetCidrBlockOutput
+	associateSubnetCidrBlockErr        error
+	associateVpcCidrBlockInput         *ec2.AssociateVpcCidrBlockInput
+	associateVpcCidrBlockOutput        *ec2.AssociateVpcCidrBlockOutput
+	associateVpcCidrBlockErr           error
+	attachInternetGatewayInput         *ec2.AttachInternetGatewayInput
+	attachInternetGatewayOutput        *ec2.AttachInternetGatewayOutput
+	attachInternetGatewayErr           error
+	authorizeSecurityGroupEgressInput  *ec2.AuthorizeSecurityGroupEgressInput
+	authorizeSecurityGroupEgressOutput *ec2.AuthorizeSecurityGroupEgressOutput
+	authorizeSecurityGroupEgressErr    error
+	createInternetGatewayInput         *ec2.CreateInternetGatewayInput
+	createInternetGatewayOutput        *ec2.CreateInternetGatewayOutput
+	createInternetGatewayErr           error
+	createRouteInputs                  []*ec2.CreateRouteInput
+	createRouteOutput                  *ec2.CreateRouteOutput
+	createRouteErr                     error
+	createRouteTableInput              *ec2.CreateRouteTableInput
+	createRouteTableOutput             *ec2.CreateRouteTableOutput
+	createRouteTableErr                error
+	createSecurityGroupInput           *ec2.CreateSecurityGroupInput
+	createSecurityGroupOutput          *ec2.CreateSecurityGroupOutput
+	createSecurityGroupErr             error
+	createSubnetInput                  *ec2.CreateSubnetInput
+	createSubnetOutput                 *ec2.CreateSubnetOutput
+	createSubnetErr                    error
+	createVpcInput                     *ec2.CreateVpcInput
+	createVpcOutput                    *ec2.CreateVpcOutput
+	createVpcErr                       error
+	describeInstanceTypesOutput        *ec2.DescribeInstanceTypesOutput
+	describeInstanceTypesErr           error
+	runInstancesInput                  *ec2.RunInstancesInput
+	runInstancesOutput                 *ec2.RunInstancesOutput
+	runInstancesErr                    error
+	describeInstancesOutput            *ec2.DescribeInstancesOutput
+	describeInstancesErr               error
+	modifySubnetAttributeInputs        []*ec2.ModifySubnetAttributeInput
+	modifySubnetAttributeErr           error
+	modifyVpcAttributeInputs           []*ec2.ModifyVpcAttributeInput
+	modifyVpcAttributeErr              error
+	revokeSecurityGroupIngressInput    *ec2.RevokeSecurityGroupIngressInput
+	revokeSecurityGroupIngressOutput   *ec2.RevokeSecurityGroupIngressOutput
+	revokeSecurityGroupIngressErr      error
+	terminateInstancesInput            *ec2.TerminateInstancesInput
+	terminateInstancesOutput           *ec2.TerminateInstancesOutput
+	terminateInstancesErr              error
+}
+
+func (r *recordingEC2Client) AssociateRouteTable(_ context.Context, input *ec2.AssociateRouteTableInput, _ ...func(*ec2.Options)) (*ec2.AssociateRouteTableOutput, error) {
+	r.associateRouteTableInput = input
+	if r.associateRouteTableErr != nil {
+		return nil, r.associateRouteTableErr
+	}
+	if r.associateRouteTableOutput == nil {
+		return &ec2.AssociateRouteTableOutput{}, nil
+	}
+	return r.associateRouteTableOutput, nil
+}
+
+func (r *recordingEC2Client) AssociateSubnetCidrBlock(_ context.Context, input *ec2.AssociateSubnetCidrBlockInput, _ ...func(*ec2.Options)) (*ec2.AssociateSubnetCidrBlockOutput, error) {
+	r.associateSubnetCidrBlockInput = input
+	if r.associateSubnetCidrBlockErr != nil {
+		return nil, r.associateSubnetCidrBlockErr
+	}
+	if r.associateSubnetCidrBlockOutput == nil {
+		return &ec2.AssociateSubnetCidrBlockOutput{}, nil
+	}
+	return r.associateSubnetCidrBlockOutput, nil
+}
+
+func (r *recordingEC2Client) AssociateVpcCidrBlock(_ context.Context, input *ec2.AssociateVpcCidrBlockInput, _ ...func(*ec2.Options)) (*ec2.AssociateVpcCidrBlockOutput, error) {
+	r.associateVpcCidrBlockInput = input
+	if r.associateVpcCidrBlockErr != nil {
+		return nil, r.associateVpcCidrBlockErr
+	}
+	if r.associateVpcCidrBlockOutput == nil {
+		return &ec2.AssociateVpcCidrBlockOutput{}, nil
+	}
+	return r.associateVpcCidrBlockOutput, nil
+}
+
+func (r *recordingEC2Client) AttachInternetGateway(_ context.Context, input *ec2.AttachInternetGatewayInput, _ ...func(*ec2.Options)) (*ec2.AttachInternetGatewayOutput, error) {
+	r.attachInternetGatewayInput = input
+	if r.attachInternetGatewayErr != nil {
+		return nil, r.attachInternetGatewayErr
+	}
+	if r.attachInternetGatewayOutput == nil {
+		return &ec2.AttachInternetGatewayOutput{}, nil
+	}
+	return r.attachInternetGatewayOutput, nil
+}
+
+func (r *recordingEC2Client) AuthorizeSecurityGroupEgress(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
+	r.authorizeSecurityGroupEgressInput = input
+	if r.authorizeSecurityGroupEgressErr != nil {
+		return nil, r.authorizeSecurityGroupEgressErr
+	}
+	if r.authorizeSecurityGroupEgressOutput == nil {
+		return &ec2.AuthorizeSecurityGroupEgressOutput{}, nil
+	}
+	return r.authorizeSecurityGroupEgressOutput, nil
+}
+
+func (r *recordingEC2Client) CreateInternetGateway(_ context.Context, input *ec2.CreateInternetGatewayInput, _ ...func(*ec2.Options)) (*ec2.CreateInternetGatewayOutput, error) {
+	r.createInternetGatewayInput = input
+	if r.createInternetGatewayErr != nil {
+		return nil, r.createInternetGatewayErr
+	}
+	if r.createInternetGatewayOutput == nil {
+		return &ec2.CreateInternetGatewayOutput{}, nil
+	}
+	return r.createInternetGatewayOutput, nil
+}
+
+func (r *recordingEC2Client) CreateRoute(_ context.Context, input *ec2.CreateRouteInput, _ ...func(*ec2.Options)) (*ec2.CreateRouteOutput, error) {
+	r.createRouteInputs = append(r.createRouteInputs, input)
+	if r.createRouteErr != nil {
+		return nil, r.createRouteErr
+	}
+	if r.createRouteOutput == nil {
+		return &ec2.CreateRouteOutput{}, nil
+	}
+	return r.createRouteOutput, nil
+}
+
+func (r *recordingEC2Client) CreateRouteTable(_ context.Context, input *ec2.CreateRouteTableInput, _ ...func(*ec2.Options)) (*ec2.CreateRouteTableOutput, error) {
+	r.createRouteTableInput = input
+	if r.createRouteTableErr != nil {
+		return nil, r.createRouteTableErr
+	}
+	if r.createRouteTableOutput == nil {
+		return &ec2.CreateRouteTableOutput{}, nil
+	}
+	return r.createRouteTableOutput, nil
+}
+
+func (r *recordingEC2Client) CreateSecurityGroup(_ context.Context, input *ec2.CreateSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
+	r.createSecurityGroupInput = input
+	if r.createSecurityGroupErr != nil {
+		return nil, r.createSecurityGroupErr
+	}
+	if r.createSecurityGroupOutput == nil {
+		return &ec2.CreateSecurityGroupOutput{}, nil
+	}
+	return r.createSecurityGroupOutput, nil
+}
+
+func (r *recordingEC2Client) CreateSubnet(_ context.Context, input *ec2.CreateSubnetInput, _ ...func(*ec2.Options)) (*ec2.CreateSubnetOutput, error) {
+	r.createSubnetInput = input
+	if r.createSubnetErr != nil {
+		return nil, r.createSubnetErr
+	}
+	if r.createSubnetOutput == nil {
+		return &ec2.CreateSubnetOutput{}, nil
+	}
+	return r.createSubnetOutput, nil
+}
+
+func (r *recordingEC2Client) CreateVpc(_ context.Context, input *ec2.CreateVpcInput, _ ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error) {
+	r.createVpcInput = input
+	if r.createVpcErr != nil {
+		return nil, r.createVpcErr
+	}
+	if r.createVpcOutput == nil {
+		return &ec2.CreateVpcOutput{}, nil
+	}
+	return r.createVpcOutput, nil
 }
 
 func (r *recordingEC2Client) DescribeInstanceTypes(context.Context, *ec2.DescribeInstanceTypesInput, ...func(*ec2.Options)) (*ec2.DescribeInstanceTypesOutput, error) {
@@ -600,6 +1010,33 @@ func (r *recordingEC2Client) RunInstances(_ context.Context, input *ec2.RunInsta
 		return &ec2.RunInstancesOutput{}, nil
 	}
 	return r.runInstancesOutput, nil
+}
+
+func (r *recordingEC2Client) ModifySubnetAttribute(_ context.Context, input *ec2.ModifySubnetAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifySubnetAttributeOutput, error) {
+	r.modifySubnetAttributeInputs = append(r.modifySubnetAttributeInputs, input)
+	if r.modifySubnetAttributeErr != nil {
+		return nil, r.modifySubnetAttributeErr
+	}
+	return &ec2.ModifySubnetAttributeOutput{}, nil
+}
+
+func (r *recordingEC2Client) ModifyVpcAttribute(_ context.Context, input *ec2.ModifyVpcAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyVpcAttributeOutput, error) {
+	r.modifyVpcAttributeInputs = append(r.modifyVpcAttributeInputs, input)
+	if r.modifyVpcAttributeErr != nil {
+		return nil, r.modifyVpcAttributeErr
+	}
+	return &ec2.ModifyVpcAttributeOutput{}, nil
+}
+
+func (r *recordingEC2Client) RevokeSecurityGroupIngress(_ context.Context, input *ec2.RevokeSecurityGroupIngressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+	r.revokeSecurityGroupIngressInput = input
+	if r.revokeSecurityGroupIngressErr != nil {
+		return nil, r.revokeSecurityGroupIngressErr
+	}
+	if r.revokeSecurityGroupIngressOutput == nil {
+		return &ec2.RevokeSecurityGroupIngressOutput{}, nil
+	}
+	return r.revokeSecurityGroupIngressOutput, nil
 }
 
 func (r *recordingEC2Client) TerminateInstances(_ context.Context, input *ec2.TerminateInstancesInput, _ ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
@@ -651,4 +1088,23 @@ func toTagMap(specs []ec2types.TagSpecification) map[string]string {
 		}
 	}
 	return result
+}
+
+func containsEgressCIDR(permissions []ec2types.IpPermission, ipv4CIDR string, ipv6CIDR string) bool {
+	for _, permission := range permissions {
+		if awsv2.ToString(permission.IpProtocol) != "-1" {
+			continue
+		}
+		for _, ipRange := range permission.IpRanges {
+			if ipv4CIDR != "" && awsv2.ToString(ipRange.CidrIp) == ipv4CIDR {
+				return true
+			}
+		}
+		for _, ipRange := range permission.Ipv6Ranges {
+			if ipv6CIDR != "" && awsv2.ToString(ipRange.CidrIpv6) == ipv6CIDR {
+				return true
+			}
+		}
+	}
+	return false
 }
