@@ -156,6 +156,12 @@ func awsComputeInstanceSchema() provider.ResourceSchema {
 				Description: "EC2 key pair name for SSH access.",
 			},
 			{
+				Name:        "network_mode",
+				Type:        provider.SchemaAttributeTypeString,
+				Optional:    true,
+				Description: "High-level network mode for the primary interface. Supported values: ipv4, ipv6, ipv4+ipv6. More specific network flags override this shorthand when both are set.",
+			},
+			{
 				Name:         "use_default_vpc",
 				Type:         provider.SchemaAttributeTypeBool,
 				Optional:     true,

@@ -8,15 +8,20 @@ import (
 
 const (
 	providerConfigAMI              = "ami"
+	providerConfigNetworkMode      = "network_mode"
 	providerConfigSubnetID         = "subnet_id"
 	providerConfigSecurityGroupIDs = "security_group_ids"
 	providerConfigKeyName          = "key_name"
 	providerAttributeSubnetID      = "subnet_id"
 	providerAttributeVPCID         = "vpc_id"
+	providerNetworkModeIPv4        = "ipv4"
+	providerNetworkModeIPv6        = "ipv6"
+	providerNetworkModeDualStack   = "ipv4+ipv6"
 )
 
 type startInstanceProviderConfig struct {
 	AMI              string
+	NetworkMode      string
 	SubnetID         string
 	SecurityGroupIDs []string
 	KeyName          string
@@ -25,18 +30,22 @@ type startInstanceProviderConfig struct {
 
 func parseStartInstanceProviderConfig(config map[string]any) (startInstanceProviderConfig, error) {
 	result := startInstanceProviderConfig{}
+	var err error
 
 	result.AMI = parseStringProviderConfig(config, providerConfigAMI)
+	result.NetworkMode, err = parseNetworkModeProviderConfig(config)
+	if err != nil {
+		return startInstanceProviderConfig{}, err
+	}
 	result.SubnetID = parseStringProviderConfig(config, providerConfigSubnetID)
 	result.KeyName = parseStringProviderConfig(config, providerConfigKeyName)
 
-	var err error
 	result.SecurityGroupIDs, err = parseStringListProviderConfig(config, providerConfigSecurityGroupIDs)
 	if err != nil {
 		return startInstanceProviderConfig{}, err
 	}
 
-	result.LaunchOptions, err = parseStartInstanceLaunchProviderConfig(config)
+	result.LaunchOptions, err = parseStartInstanceLaunchProviderConfig(config, result.NetworkMode)
 	if err != nil {
 		return startInstanceProviderConfig{}, err
 	}
@@ -44,10 +53,14 @@ func parseStartInstanceProviderConfig(config map[string]any) (startInstanceProvi
 	return result, nil
 }
 
-func parseStartInstanceLaunchProviderConfig(config map[string]any) (startInstanceLaunchOptions, error) {
+func parseStartInstanceLaunchProviderConfig(config map[string]any, networkMode string) (startInstanceLaunchOptions, error) {
 	result := startInstanceLaunchOptions{}
+	var (
+		err                 error
+		hasAssignPublicIPv6 bool
+		hasIPv6AddressCount bool
+	)
 
-	var err error
 	if result.useDefaultVPC, _, err = parseBoolProviderConfig(config, optionUseDefaultVPC); err != nil {
 		return startInstanceLaunchOptions{}, err
 	}
@@ -60,10 +73,10 @@ func parseStartInstanceLaunchProviderConfig(config map[string]any) (startInstanc
 	if result.associatePublicIPv4, result.hasAssociatePublicIPv4, err = parseBoolProviderConfig(config, optionAssociatePublicIPv4); err != nil {
 		return startInstanceLaunchOptions{}, err
 	}
-	if result.assignPublicIPv6, _, err = parseBoolProviderConfig(config, optionAssignPublicIPv6); err != nil {
+	if result.assignPublicIPv6, hasAssignPublicIPv6, err = parseBoolProviderConfig(config, optionAssignPublicIPv6); err != nil {
 		return startInstanceLaunchOptions{}, err
 	}
-	if result.ipv6AddressCount, _, err = parsePositiveInt32ProviderConfig(config, optionIPv6AddressCount); err != nil {
+	if result.ipv6AddressCount, hasIPv6AddressCount, err = parsePositiveInt32ProviderConfig(config, optionIPv6AddressCount); err != nil {
 		return startInstanceLaunchOptions{}, err
 	}
 	if result.rootVolumeSizeGiB, _, err = parsePositiveInt32ProviderConfig(config, optionRootVolumeSizeGiB); err != nil {
@@ -73,11 +86,66 @@ func parseStartInstanceLaunchProviderConfig(config map[string]any) (startInstanc
 	if result.useDefaultVPC {
 		result.useDefaultSubnet = true
 	}
+	switch networkMode {
+	case providerNetworkModeIPv4:
+		if !result.hasAssociatePublicIPv4 {
+			result.associatePublicIPv4 = true
+			result.hasAssociatePublicIPv4 = true
+		}
+		if !hasAssignPublicIPv6 {
+			result.assignPublicIPv6 = false
+		}
+		if !hasIPv6AddressCount {
+			result.ipv6AddressCount = 0
+		}
+	case providerNetworkModeIPv6:
+		if !result.hasAssociatePublicIPv4 {
+			result.associatePublicIPv4 = false
+			result.hasAssociatePublicIPv4 = true
+		}
+		if !hasAssignPublicIPv6 {
+			result.assignPublicIPv6 = true
+		}
+		if !hasIPv6AddressCount && result.ipv6AddressCount == 0 {
+			result.ipv6AddressCount = 1
+		}
+	case providerNetworkModeDualStack:
+		if !result.hasAssociatePublicIPv4 {
+			result.associatePublicIPv4 = true
+			result.hasAssociatePublicIPv4 = true
+		}
+		if !hasAssignPublicIPv6 {
+			result.assignPublicIPv6 = true
+		}
+		if !hasIPv6AddressCount && result.ipv6AddressCount == 0 {
+			result.ipv6AddressCount = 1
+		}
+	}
 	if result.assignPublicIPv6 && result.ipv6AddressCount == 0 {
 		result.ipv6AddressCount = 1
 	}
 
 	return result, nil
+}
+
+func parseNetworkModeProviderConfig(config map[string]any) (string, error) {
+	value, ok := lookupProviderConfigValue(config, providerConfigNetworkMode)
+	if !ok {
+		return "", nil
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(asString(value)))
+	comparable := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(normalized)
+	switch comparable {
+	case "ipv4":
+		return providerNetworkModeIPv4, nil
+	case "ipv6":
+		return providerNetworkModeIPv6, nil
+	case "ipv4+ipv6", "ipv6+ipv4", "dual", "dualstack":
+		return providerNetworkModeDualStack, nil
+	default:
+		return "", fmt.Errorf("provider_config.%s must be one of ipv4, ipv6, or ipv4+ipv6", providerConfigNetworkMode)
+	}
 }
 
 func parseStringProviderConfig(config map[string]any, target string) string {

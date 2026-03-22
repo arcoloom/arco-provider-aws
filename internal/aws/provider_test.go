@@ -56,6 +56,7 @@ func TestSchema(t *testing.T) {
 	}
 
 	foundAMI := false
+	foundNetworkMode := false
 	foundSecurityGroups := false
 	for _, attribute := range resources[0].Attributes {
 		switch attribute.Name {
@@ -69,9 +70,14 @@ func TestSchema(t *testing.T) {
 			if attribute.Type != provider.SchemaAttributeTypeStringList {
 				t.Fatalf("unexpected security_group_ids attribute: %+v", attribute)
 			}
+		case "network_mode":
+			foundNetworkMode = true
+			if attribute.Type != provider.SchemaAttributeTypeString || !attribute.Optional {
+				t.Fatalf("unexpected network_mode attribute: %+v", attribute)
+			}
 		}
 	}
-	if !foundAMI || !foundSecurityGroups {
+	if !foundAMI || !foundNetworkMode || !foundSecurityGroups {
 		t.Fatalf("expected aws launch attributes in schema, got %+v", resources[0].Attributes)
 	}
 }

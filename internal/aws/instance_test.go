@@ -387,8 +387,7 @@ func TestStartInstanceResolvesDefaultNetworkAndRootVolumeFromOptions(t *testing.
 		ProviderConfig: map[string]any{
 			optionUseDefaultVPC:           true,
 			optionUseDefaultSecurityGroup: true,
-			optionAssociatePublicIPv4:     false,
-			optionAssignPublicIPv6:        true,
+			providerConfigNetworkMode:     providerNetworkModeIPv6,
 			optionRootVolumeSizeGiB:       int64(20),
 		},
 	})
