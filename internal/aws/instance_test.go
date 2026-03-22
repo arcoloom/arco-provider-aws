@@ -623,6 +623,16 @@ func TestStartInstanceCreatesManagedNetworkWhenMissing(t *testing.T) {
 	if got := awsv2.ToString(ec2Client.createSecurityGroupInput.GroupName); got != managedNetworkSecurityGroupName {
 		t.Fatalf("unexpected managed security group name: %q", got)
 	}
+	authorizedEgress := flattenAuthorizedEgressPermissions(ec2Client.authorizeSecurityGroupEgressInputs)
+	if got := len(authorizedEgress); got != 2 {
+		t.Fatalf("expected ipv4 and ipv6 outbound rules to be enforced on the new managed security group, got %+v", authorizedEgress)
+	}
+	if !containsEgressCIDR(authorizedEgress, "0.0.0.0/0", "") {
+		t.Fatalf("expected ipv4 outbound rule on the new managed security group, got %+v", authorizedEgress)
+	}
+	if !containsEgressCIDR(authorizedEgress, "", "::/0") {
+		t.Fatalf("expected ipv6 outbound rule on the new managed security group, got %+v", authorizedEgress)
+	}
 	if got := len(ec2Client.modifyVpcAttributeInputs); got != 2 {
 		t.Fatalf("expected dns support and hostnames to be enabled on the managed vpc, got %d calls", got)
 	}
@@ -681,17 +691,160 @@ func TestEnsureManagedSecurityGroupEnforcesOutboundOnly(t *testing.T) {
 	if got := len(ec2Client.revokeSecurityGroupIngressInput.IpPermissions); got != 1 {
 		t.Fatalf("expected a single ingress rule revoke, got %d", got)
 	}
-	if ec2Client.authorizeSecurityGroupEgressInput == nil {
-		t.Fatal("expected outbound rules to be authorized")
+	authorizedEgress := flattenAuthorizedEgressPermissions(ec2Client.authorizeSecurityGroupEgressInputs)
+	if got := len(authorizedEgress); got != 2 {
+		t.Fatalf("expected ipv4 and ipv6 outbound rules, got %+v", authorizedEgress)
 	}
-	if got := len(ec2Client.authorizeSecurityGroupEgressInput.IpPermissions); got != 2 {
-		t.Fatalf("expected ipv4 and ipv6 outbound rules, got %d", got)
+	if !containsEgressCIDR(authorizedEgress, "0.0.0.0/0", "") {
+		t.Fatalf("expected ipv4 egress rule, got %+v", authorizedEgress)
 	}
-	if !containsEgressCIDR(ec2Client.authorizeSecurityGroupEgressInput.IpPermissions, "0.0.0.0/0", "") {
-		t.Fatalf("expected ipv4 egress rule, got %+v", ec2Client.authorizeSecurityGroupEgressInput.IpPermissions)
+	if !containsEgressCIDR(authorizedEgress, "", "::/0") {
+		t.Fatalf("expected ipv6 egress rule, got %+v", authorizedEgress)
 	}
-	if !containsEgressCIDR(ec2Client.authorizeSecurityGroupEgressInput.IpPermissions, "", "::/0") {
-		t.Fatalf("expected ipv6 egress rule, got %+v", ec2Client.authorizeSecurityGroupEgressInput.IpPermissions)
+}
+
+func TestEnsureManagedVPCIPv6WaitsForAssociatedCIDR(t *testing.T) {
+	ec2Client := &recordingEC2Client{
+		describeVpcsOutputs: []*ec2.DescribeVpcsOutput{
+			{
+				Vpcs: []ec2types.Vpc{
+					{
+						VpcId: awsv2.String("vpc-arco"),
+						Ipv6CidrBlockAssociationSet: []ec2types.VpcIpv6CidrBlockAssociation{
+							{
+								Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/56"),
+								Ipv6CidrBlockState: &ec2types.VpcCidrBlockState{
+									State: ec2types.VpcCidrBlockStateCodeAssociating,
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				Vpcs: []ec2types.Vpc{
+					{
+						VpcId: awsv2.String("vpc-arco"),
+						Ipv6CidrBlockAssociationSet: []ec2types.VpcIpv6CidrBlockAssociation{
+							{
+								Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/56"),
+								Ipv6CidrBlockState: &ec2types.VpcCidrBlockState{
+									State: ec2types.VpcCidrBlockStateCodeAssociated,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	vpc, err := ensureManagedVPCIPv6(context.Background(), ec2Client, "us-west-1", ec2types.Vpc{
+		VpcId: awsv2.String("vpc-arco"),
+		Ipv6CidrBlockAssociationSet: []ec2types.VpcIpv6CidrBlockAssociation{
+			{
+				Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/56"),
+				Ipv6CidrBlockState: &ec2types.VpcCidrBlockState{
+					State: ec2types.VpcCidrBlockStateCodeAssociating,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ensureManagedVPCIPv6() error = %v", err)
+	}
+	if ec2Client.associateVpcCidrBlockInput != nil {
+		t.Fatalf("expected existing ipv6 association to be awaited, not recreated: %+v", ec2Client.associateVpcCidrBlockInput)
+	}
+	if got := managedVPCIPv6CIDR(vpc); got != "2600:1f14:abcd:ef00::/56" {
+		t.Fatalf("unexpected managed vpc ipv6 cidr after wait: %q", got)
+	}
+}
+
+func TestEnsureManagedSubnetReadyWaitsForAssociatedCIDRBeforeIPv6AutoAssign(t *testing.T) {
+	ec2Client := &recordingEC2Client{
+		describeSubnetsOutputs: []*ec2.DescribeSubnetsOutput{
+			{
+				Subnets: []ec2types.Subnet{
+					{
+						SubnetId:         awsv2.String("subnet-arco"),
+						CidrBlock:        awsv2.String("10.77.0.0/24"),
+						AvailabilityZone: awsv2.String("us-west-1d"),
+						Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
+							{
+								Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/64"),
+								Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
+									State: ec2types.SubnetCidrBlockStateCodeAssociating,
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				Subnets: []ec2types.Subnet{
+					{
+						SubnetId:                    awsv2.String("subnet-arco"),
+						CidrBlock:                   awsv2.String("10.77.0.0/24"),
+						AvailabilityZone:            awsv2.String("us-west-1d"),
+						MapPublicIpOnLaunch:         awsv2.Bool(false),
+						AssignIpv6AddressOnCreation: awsv2.Bool(false),
+						Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
+							{
+								Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/64"),
+								Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
+									State: ec2types.SubnetCidrBlockStateCodeAssociated,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	subnet, err := ensureManagedSubnetReady(
+		context.Background(),
+		ec2Client,
+		"us-west-1",
+		ec2types.Vpc{
+			VpcId: awsv2.String("vpc-arco"),
+			Ipv6CidrBlockAssociationSet: []ec2types.VpcIpv6CidrBlockAssociation{
+				{
+					Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/56"),
+					Ipv6CidrBlockState: &ec2types.VpcCidrBlockState{
+						State: ec2types.VpcCidrBlockStateCodeAssociated,
+					},
+				},
+			},
+		},
+		ec2types.RouteTable{},
+		ec2types.Subnet{
+			SubnetId:         awsv2.String("subnet-arco"),
+			CidrBlock:        awsv2.String("10.77.0.0/24"),
+			AvailabilityZone: awsv2.String("us-west-1d"),
+			Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
+				{
+					Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/64"),
+					Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
+						State: ec2types.SubnetCidrBlockStateCodeAssociating,
+					},
+				},
+			},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ensureManagedSubnetReady() error = %v", err)
+	}
+	if ec2Client.associateSubnetCidrBlockInput != nil {
+		t.Fatalf("expected existing subnet ipv6 association to be awaited, not recreated: %+v", ec2Client.associateSubnetCidrBlockInput)
+	}
+	if !subnetSupportsIPv6(subnet) {
+		t.Fatalf("expected subnet to report ipv6 support after wait, got %+v", subnet.Ipv6CidrBlockAssociationSet)
+	}
+	if got := len(ec2Client.modifySubnetAttributeInputs); got != 2 {
+		t.Fatalf("expected subnet attribute updates after ipv6 association completed, got %d", got)
 	}
 }
 
@@ -820,7 +973,7 @@ type recordingEC2Client struct {
 	attachInternetGatewayInput         *ec2.AttachInternetGatewayInput
 	attachInternetGatewayOutput        *ec2.AttachInternetGatewayOutput
 	attachInternetGatewayErr           error
-	authorizeSecurityGroupEgressInput  *ec2.AuthorizeSecurityGroupEgressInput
+	authorizeSecurityGroupEgressInputs []*ec2.AuthorizeSecurityGroupEgressInput
 	authorizeSecurityGroupEgressOutput *ec2.AuthorizeSecurityGroupEgressOutput
 	authorizeSecurityGroupEgressErr    error
 	createInternetGatewayInput         *ec2.CreateInternetGatewayInput
@@ -841,8 +994,12 @@ type recordingEC2Client struct {
 	createVpcInput                     *ec2.CreateVpcInput
 	createVpcOutput                    *ec2.CreateVpcOutput
 	createVpcErr                       error
+	describeSubnetsOutputs             []*ec2.DescribeSubnetsOutput
+	describeSubnetsCallCount           int
 	describeInstanceTypesOutput        *ec2.DescribeInstanceTypesOutput
 	describeInstanceTypesErr           error
+	describeVpcsOutputs                []*ec2.DescribeVpcsOutput
+	describeVpcsCallCount              int
 	runInstancesInput                  *ec2.RunInstancesInput
 	runInstancesOutput                 *ec2.RunInstancesOutput
 	runInstancesErr                    error
@@ -905,7 +1062,7 @@ func (r *recordingEC2Client) AttachInternetGateway(_ context.Context, input *ec2
 }
 
 func (r *recordingEC2Client) AuthorizeSecurityGroupEgress(_ context.Context, input *ec2.AuthorizeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
-	r.authorizeSecurityGroupEgressInput = input
+	r.authorizeSecurityGroupEgressInputs = append(r.authorizeSecurityGroupEgressInputs, input)
 	if r.authorizeSecurityGroupEgressErr != nil {
 		return nil, r.authorizeSecurityGroupEgressErr
 	}
@@ -989,6 +1146,36 @@ func (r *recordingEC2Client) DescribeInstanceTypes(context.Context, *ec2.Describ
 		return &ec2.DescribeInstanceTypesOutput{}, nil
 	}
 	return r.describeInstanceTypesOutput, nil
+}
+
+func (r *recordingEC2Client) DescribeSubnets(ctx context.Context, input *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
+	if len(r.describeSubnetsOutputs) > 0 {
+		idx := r.describeSubnetsCallCount
+		if idx >= len(r.describeSubnetsOutputs) {
+			idx = len(r.describeSubnetsOutputs) - 1
+		}
+		r.describeSubnetsCallCount++
+		if r.describeSubnetsOutputs[idx] == nil {
+			return &ec2.DescribeSubnetsOutput{}, nil
+		}
+		return r.describeSubnetsOutputs[idx], nil
+	}
+	return r.fakeEC2Client.DescribeSubnets(ctx, input, optFns...)
+}
+
+func (r *recordingEC2Client) DescribeVpcs(ctx context.Context, input *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
+	if len(r.describeVpcsOutputs) > 0 {
+		idx := r.describeVpcsCallCount
+		if idx >= len(r.describeVpcsOutputs) {
+			idx = len(r.describeVpcsOutputs) - 1
+		}
+		r.describeVpcsCallCount++
+		if r.describeVpcsOutputs[idx] == nil {
+			return &ec2.DescribeVpcsOutput{}, nil
+		}
+		return r.describeVpcsOutputs[idx], nil
+	}
+	return r.fakeEC2Client.DescribeVpcs(ctx, input, optFns...)
 }
 
 func (r *recordingEC2Client) DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
@@ -1107,4 +1294,12 @@ func containsEgressCIDR(permissions []ec2types.IpPermission, ipv4CIDR string, ip
 		}
 	}
 	return false
+}
+
+func flattenAuthorizedEgressPermissions(inputs []*ec2.AuthorizeSecurityGroupEgressInput) []ec2types.IpPermission {
+	permissions := make([]ec2types.IpPermission, 0)
+	for _, input := range inputs {
+		permissions = append(permissions, input.IpPermissions...)
+	}
+	return permissions
 }

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -32,6 +33,8 @@ const (
 	managedNetworkKindRouteTable      = "shared-route-table"
 	managedNetworkKindInternetGateway = "shared-internet-gateway"
 	managedNetworkSGDescription       = "Managed by arco-provider-aws for outbound-only EC2 access"
+	managedNetworkWaitTimeout         = 20 * time.Second
+	managedNetworkPollInterval        = 200 * time.Millisecond
 )
 
 type managedNetwork struct {
@@ -162,21 +165,24 @@ func ensureManagedVPCIPv6(ctx context.Context, ec2Client ec2API, region string, 
 		return vpc, nil
 	}
 
-	output, err := ec2Client.AssociateVpcCidrBlock(ctx, &ec2.AssociateVpcCidrBlockInput{
-		VpcId:                       awsv2.String(awsv2.ToString(vpc.VpcId)),
-		AmazonProvidedIpv6CidrBlock: awsv2.Bool(true),
-	})
-	if err != nil {
-		return ec2types.Vpc{}, fmt.Errorf("associate ipv6 cidr with vpc %s in region %s: %w", awsv2.ToString(vpc.VpcId), region, err)
-	}
-	if output.Ipv6CidrBlockAssociation != nil {
-		vpc.Ipv6CidrBlockAssociationSet = append(vpc.Ipv6CidrBlockAssociationSet, *output.Ipv6CidrBlockAssociation)
-	}
-	if managedVPCIPv6CIDR(vpc) == "" {
-		return ec2types.Vpc{}, fmt.Errorf("managed vpc %s in region %s did not expose an ipv6 cidr block", awsv2.ToString(vpc.VpcId), region)
+	if !managedVPCHasAnyIPv6CIDR(vpc) {
+		output, err := ec2Client.AssociateVpcCidrBlock(ctx, &ec2.AssociateVpcCidrBlockInput{
+			VpcId:                       awsv2.String(awsv2.ToString(vpc.VpcId)),
+			AmazonProvidedIpv6CidrBlock: awsv2.Bool(true),
+		})
+		if err != nil {
+			return ec2types.Vpc{}, fmt.Errorf("associate ipv6 cidr with vpc %s in region %s: %w", awsv2.ToString(vpc.VpcId), region, err)
+		}
+		if output.Ipv6CidrBlockAssociation != nil {
+			vpc.Ipv6CidrBlockAssociationSet = append(vpc.Ipv6CidrBlockAssociationSet, *output.Ipv6CidrBlockAssociation)
+		}
 	}
 
-	return vpc, nil
+	waited, err := waitForManagedVPCIPv6CIDR(ctx, ec2Client, region, awsv2.ToString(vpc.VpcId))
+	if err != nil {
+		return ec2types.Vpc{}, err
+	}
+	return waited, nil
 }
 
 func ensureManagedInternetGateway(ctx context.Context, ec2Client ec2API, region string, vpcID string) (ec2types.InternetGateway, error) {
@@ -457,24 +463,32 @@ func ensureManagedSubnetReady(
 	}
 
 	if !subnetSupportsIPv6(subnet) {
-		index, err := managedSubnetIndex(subnet)
+		if !subnetHasAnyIPv6CIDR(subnet) {
+			index, err := managedSubnetIndex(subnet)
+			if err != nil {
+				return ec2types.Subnet{}, err
+			}
+			ipv6CIDR, err := managedSubnetIPv6CIDR(managedVPCIPv6CIDR(vpc), index)
+			if err != nil {
+				return ec2types.Subnet{}, err
+			}
+			output, err := ec2Client.AssociateSubnetCidrBlock(ctx, &ec2.AssociateSubnetCidrBlockInput{
+				SubnetId:      awsv2.String(subnetID),
+				Ipv6CidrBlock: awsv2.String(ipv6CIDR),
+			})
+			if err != nil {
+				return ec2types.Subnet{}, fmt.Errorf("associate ipv6 cidr with subnet %s in region %s: %w", subnetID, region, err)
+			}
+			if output.Ipv6CidrBlockAssociation != nil {
+				subnet.Ipv6CidrBlockAssociationSet = append(subnet.Ipv6CidrBlockAssociationSet, *output.Ipv6CidrBlockAssociation)
+			}
+		}
+
+		refreshedSubnet, err := waitForManagedSubnetIPv6CIDR(ctx, ec2Client, region, subnetID)
 		if err != nil {
 			return ec2types.Subnet{}, err
 		}
-		ipv6CIDR, err := managedSubnetIPv6CIDR(managedVPCIPv6CIDR(vpc), index)
-		if err != nil {
-			return ec2types.Subnet{}, err
-		}
-		output, err := ec2Client.AssociateSubnetCidrBlock(ctx, &ec2.AssociateSubnetCidrBlockInput{
-			SubnetId:      awsv2.String(subnetID),
-			Ipv6CidrBlock: awsv2.String(ipv6CIDR),
-		})
-		if err != nil {
-			return ec2types.Subnet{}, fmt.Errorf("associate ipv6 cidr with subnet %s in region %s: %w", subnetID, region, err)
-		}
-		if output.Ipv6CidrBlockAssociation != nil {
-			subnet.Ipv6CidrBlockAssociationSet = append(subnet.Ipv6CidrBlockAssociationSet, *output.Ipv6CidrBlockAssociation)
-		}
+		subnet = refreshedSubnet
 	}
 
 	if !awsv2.ToBool(subnet.MapPublicIpOnLaunch) {
@@ -552,11 +566,18 @@ func ensureManagedSecurityGroup(ctx context.Context, ec2Client ec2API, region st
 		if groupID == "" {
 			return ec2types.SecurityGroup{}, fmt.Errorf("create managed security group for vpc %s in region %s returned an empty group id", vpcID, region)
 		}
-		return ec2types.SecurityGroup{
+		securityGroup := ec2types.SecurityGroup{
 			GroupId:   awsv2.String(groupID),
 			GroupName: awsv2.String(managedNetworkSecurityGroupName),
 			VpcId:     awsv2.String(vpcID),
-		}, nil
+		}
+		if err := ensureManagedSecurityGroupIngressCleared(ctx, ec2Client, region, securityGroup); err != nil {
+			return ec2types.SecurityGroup{}, err
+		}
+		if err := ensureManagedSecurityGroupEgress(ctx, ec2Client, region, securityGroup); err != nil {
+			return ec2types.SecurityGroup{}, err
+		}
+		return securityGroup, nil
 	}
 
 	securityGroups := append([]ec2types.SecurityGroup(nil), output.SecurityGroups...)
@@ -565,26 +586,39 @@ func ensureManagedSecurityGroup(ctx context.Context, ec2Client ec2API, region st
 	})
 
 	securityGroup := securityGroups[0]
-	if len(securityGroup.IpPermissions) > 0 {
-		if _, err := ec2Client.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{
-			GroupId:       awsv2.String(awsv2.ToString(securityGroup.GroupId)),
-			IpPermissions: append([]ec2types.IpPermission(nil), securityGroup.IpPermissions...),
-		}); err != nil {
-			return ec2types.SecurityGroup{}, fmt.Errorf("revoke ingress rules on managed security group %s in region %s: %w", awsv2.ToString(securityGroup.GroupId), region, err)
-		}
+	if err := ensureManagedSecurityGroupIngressCleared(ctx, ec2Client, region, securityGroup); err != nil {
+		return ec2types.SecurityGroup{}, err
 	}
-
-	missingEgress := missingManagedEgressPermissions(securityGroup)
-	if len(missingEgress) > 0 {
-		if _, err := ec2Client.AuthorizeSecurityGroupEgress(ctx, &ec2.AuthorizeSecurityGroupEgressInput{
-			GroupId:       awsv2.String(awsv2.ToString(securityGroup.GroupId)),
-			IpPermissions: missingEgress,
-		}); err != nil && !hasAPIErrorCode(err, "InvalidPermission.Duplicate") {
-			return ec2types.SecurityGroup{}, fmt.Errorf("authorize outbound rules on managed security group %s in region %s: %w", awsv2.ToString(securityGroup.GroupId), region, err)
-		}
+	if err := ensureManagedSecurityGroupEgress(ctx, ec2Client, region, securityGroup); err != nil {
+		return ec2types.SecurityGroup{}, err
 	}
 
 	return securityGroup, nil
+}
+
+func ensureManagedSecurityGroupIngressCleared(ctx context.Context, ec2Client ec2API, region string, securityGroup ec2types.SecurityGroup) error {
+	if len(securityGroup.IpPermissions) == 0 {
+		return nil
+	}
+	if _, err := ec2Client.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{
+		GroupId:       awsv2.String(awsv2.ToString(securityGroup.GroupId)),
+		IpPermissions: append([]ec2types.IpPermission(nil), securityGroup.IpPermissions...),
+	}); err != nil {
+		return fmt.Errorf("revoke ingress rules on managed security group %s in region %s: %w", awsv2.ToString(securityGroup.GroupId), region, err)
+	}
+	return nil
+}
+
+func ensureManagedSecurityGroupEgress(ctx context.Context, ec2Client ec2API, region string, securityGroup ec2types.SecurityGroup) error {
+	for _, permission := range missingManagedEgressPermissions(securityGroup) {
+		if _, err := ec2Client.AuthorizeSecurityGroupEgress(ctx, &ec2.AuthorizeSecurityGroupEgressInput{
+			GroupId:       awsv2.String(awsv2.ToString(securityGroup.GroupId)),
+			IpPermissions: []ec2types.IpPermission{permission},
+		}); err != nil && !hasAPIErrorCode(err, "InvalidPermission.Duplicate") {
+			return fmt.Errorf("authorize outbound rules on managed security group %s in region %s: %w", awsv2.ToString(securityGroup.GroupId), region, err)
+		}
+	}
+	return nil
 }
 
 func routeTableHasDestination(routeTable ec2types.RouteTable, ipv4Destination string, ipv6Destination string) bool {
@@ -620,11 +654,89 @@ func managedVPCIPv6CIDR(vpc ec2types.Vpc) string {
 			state = normalizeToken(string(association.Ipv6CidrBlockState.State))
 		}
 		switch state {
-		case "", "associated", "associating":
+		case "", "associated":
 			return cidr
 		}
 	}
 	return ""
+}
+
+func managedVPCHasAnyIPv6CIDR(vpc ec2types.Vpc) bool {
+	for _, association := range vpc.Ipv6CidrBlockAssociationSet {
+		if strings.TrimSpace(awsv2.ToString(association.Ipv6CidrBlock)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func subnetHasAnyIPv6CIDR(subnet ec2types.Subnet) bool {
+	for _, association := range subnet.Ipv6CidrBlockAssociationSet {
+		if strings.TrimSpace(awsv2.ToString(association.Ipv6CidrBlock)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForManagedVPCIPv6CIDR(ctx context.Context, ec2Client ec2API, region string, vpcID string) (ec2types.Vpc, error) {
+	deadline := time.Now().Add(managedNetworkWaitTimeout)
+	for {
+		output, err := ec2Client.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{VpcIds: []string{vpcID}})
+		if err != nil {
+			return ec2types.Vpc{}, fmt.Errorf("describe managed vpc %s while waiting for ipv6 cidr in region %s: %w", vpcID, region, err)
+		}
+		if len(output.Vpcs) == 0 {
+			return ec2types.Vpc{}, fmt.Errorf("managed vpc %s disappeared while waiting for ipv6 cidr in region %s", vpcID, region)
+		}
+
+		vpc := output.Vpcs[0]
+		if managedVPCIPv6CIDR(vpc) != "" {
+			return vpc, nil
+		}
+		if time.Now().After(deadline) {
+			return ec2types.Vpc{}, fmt.Errorf("timed out waiting for managed vpc %s in region %s to finish associating its ipv6 cidr", vpcID, region)
+		}
+		if err := sleepWithContext(ctx, managedNetworkPollInterval); err != nil {
+			return ec2types.Vpc{}, err
+		}
+	}
+}
+
+func waitForManagedSubnetIPv6CIDR(ctx context.Context, ec2Client ec2API, region string, subnetID string) (ec2types.Subnet, error) {
+	deadline := time.Now().Add(managedNetworkWaitTimeout)
+	for {
+		output, err := ec2Client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{SubnetIds: []string{subnetID}})
+		if err != nil {
+			return ec2types.Subnet{}, fmt.Errorf("describe managed subnet %s while waiting for ipv6 cidr in region %s: %w", subnetID, region, err)
+		}
+		if len(output.Subnets) == 0 {
+			return ec2types.Subnet{}, fmt.Errorf("managed subnet %s disappeared while waiting for ipv6 cidr in region %s", subnetID, region)
+		}
+
+		subnet := output.Subnets[0]
+		if subnetSupportsIPv6(subnet) {
+			return subnet, nil
+		}
+		if time.Now().After(deadline) {
+			return ec2types.Subnet{}, fmt.Errorf("timed out waiting for managed subnet %s in region %s to finish associating its ipv6 cidr", subnetID, region)
+		}
+		if err := sleepWithContext(ctx, managedNetworkPollInterval); err != nil {
+			return ec2types.Subnet{}, err
+		}
+	}
+}
+
+func sleepWithContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func firstAvailableManagedSubnetIndex(subnets []ec2types.Subnet) (int, error) {
