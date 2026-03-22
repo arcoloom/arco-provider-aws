@@ -5,17 +5,13 @@ import "time"
 type Cloud string
 
 const (
-	CloudAWS   Cloud = "aws"
-	CloudAzure Cloud = "azure"
-	CloudGCP   Cloud = "gcp"
+	CloudAWS Cloud = "aws"
 )
 
-type AuthScheme string
-
 const (
-	AuthSchemeAWSIAM            AuthScheme = "aws_iam"
-	AuthSchemeAzureClientSecret AuthScheme = "azure_client_secret"
-	AuthSchemeGCPServiceAccount AuthScheme = "gcp_service_account"
+	AuthMethodAWSDefaultCredentials = "default_credentials"
+	AuthMethodAWSStaticAccessKey    = "static_access_key"
+	AuthMethodAWSAssumeRole         = "assume_role"
 )
 
 type ResourcePlane string
@@ -54,11 +50,18 @@ type ResourceSchema struct {
 	Attributes  []SchemaAttribute
 }
 
+type AuthMethod struct {
+	Name        string
+	DisplayName string
+	Description string
+	Fields      []SchemaAttribute
+}
+
 type Metadata struct {
 	Name              string
 	Version           string
-	Cloud             Cloud
-	SupportedAuth     []AuthScheme
+	Cloud             string
+	AuthMethods       []AuthMethod
 	SupportedServices []string
 	Capabilities      map[string]string
 	ResourcePlanes    []ResourcePlane
@@ -79,31 +82,19 @@ type ConnectionScope struct {
 }
 
 type AWSCredentials struct {
-	AccessKeyID     string
-	SecretAccessKey string
-	SessionToken    string
-	RoleARN         string
-	ExternalID      string
-}
-
-type AzureCredentials struct {
-	TenantID       string
-	ClientID       string
-	ClientSecret   string
-	SubscriptionID string
-}
-
-type GCPCredentials struct {
-	ProjectID    string
-	ClientEmail  string
-	PrivateKey   string
-	PrivateKeyID string
+	UseDefaultCredentialsChain bool
+	Profile                    string
+	AccessKeyID                string
+	SecretAccessKey            string
+	SessionToken               string
+	RoleARN                    string
+	ExternalID                 string
+	RoleSessionName            string
+	SourceIdentity             string
 }
 
 type Credentials struct {
-	AWS   *AWSCredentials
-	Azure *AzureCredentials
-	GCP   *GCPCredentials
+	AWS *AWSCredentials
 }
 
 type ValidateConnectionRequest struct {

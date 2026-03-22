@@ -15,7 +15,7 @@ func TestMetadata(t *testing.T) {
 		t.Fatalf("metadata returned error: %v", err)
 	}
 
-	if metadata.Cloud != provider.CloudAWS {
+	if metadata.Cloud != string(provider.CloudAWS) {
 		t.Fatalf("unexpected cloud: %s", metadata.Cloud)
 	}
 
@@ -24,6 +24,20 @@ func TestMetadata(t *testing.T) {
 	}
 	if metadata.Capabilities["schema_mode"] != "provider-defined" {
 		t.Fatalf("unexpected schema mode capability: %+v", metadata.Capabilities)
+	}
+
+	authMethods := make(map[string]bool, len(metadata.AuthMethods))
+	for _, method := range metadata.AuthMethods {
+		authMethods[method.Name] = true
+	}
+	for _, requiredMethod := range []string{
+		provider.AuthMethodAWSDefaultCredentials,
+		provider.AuthMethodAWSStaticAccessKey,
+		provider.AuthMethodAWSAssumeRole,
+	} {
+		if !authMethods[requiredMethod] {
+			t.Fatalf("expected auth method %q in metadata, got %+v", requiredMethod, metadata.AuthMethods)
+		}
 	}
 }
 

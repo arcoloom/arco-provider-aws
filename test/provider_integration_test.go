@@ -58,7 +58,7 @@ func TestProviderProcessLifecycleAndBusinessCalls(t *testing.T) {
 	if metadata.Name != "arco-provider-aws" {
 		t.Fatalf("unexpected provider name: %s", metadata.Name)
 	}
-	if metadata.Cloud != provider.CloudAWS {
+	if metadata.Cloud != string(provider.CloudAWS) {
 		t.Fatalf("unexpected cloud: %s", metadata.Cloud)
 	}
 	if len(metadata.ResourcePlanes) != 1 || metadata.ResourcePlanes[0] != provider.ResourcePlaneCompute {

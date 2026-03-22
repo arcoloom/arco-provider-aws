@@ -42,38 +42,38 @@ func toProtoProviderConfig(config map[string]any) *structpb.Struct {
 func toProtoCredentials(credentials provider.Credentials) *providerv1.Credentials {
 	switch {
 	case credentials.AWS != nil:
-		return &providerv1.Credentials{
-			Auth: &providerv1.Credentials_AwsIam{
-				AwsIam: &providerv1.AwsIamCredentials{
-					AccessKeyId:     credentials.AWS.AccessKeyID,
-					SecretAccessKey: credentials.AWS.SecretAccessKey,
-					SessionToken:    credentials.AWS.SessionToken,
-					RoleArn:         credentials.AWS.RoleARN,
-					ExternalId:      credentials.AWS.ExternalID,
-				},
-			},
+		authMethod := provider.AuthMethodAWSStaticAccessKey
+		if credentials.AWS.UseDefaultCredentialsChain {
+			authMethod = provider.AuthMethodAWSDefaultCredentials
+		} else if credentials.AWS.RoleARN != "" {
+			authMethod = provider.AuthMethodAWSAssumeRole
 		}
-	case credentials.Azure != nil:
-		return &providerv1.Credentials{
-			Auth: &providerv1.Credentials_AzureClientSecret{
-				AzureClientSecret: &providerv1.AzureClientSecretCredentials{
-					TenantId:       credentials.Azure.TenantID,
-					ClientId:       credentials.Azure.ClientID,
-					ClientSecret:   credentials.Azure.ClientSecret,
-					SubscriptionId: credentials.Azure.SubscriptionID,
-				},
-			},
+		data := map[string]any{}
+		if !credentials.AWS.UseDefaultCredentialsChain {
+			data["access_key_id"] = credentials.AWS.AccessKeyID
+			data["secret_access_key"] = credentials.AWS.SecretAccessKey
 		}
-	case credentials.GCP != nil:
+		if credentials.AWS.Profile != "" {
+			data["profile"] = credentials.AWS.Profile
+		}
+		if credentials.AWS.SessionToken != "" && !credentials.AWS.UseDefaultCredentialsChain {
+			data["session_token"] = credentials.AWS.SessionToken
+		}
+		if credentials.AWS.RoleARN != "" {
+			data["role_arn"] = credentials.AWS.RoleARN
+		}
+		if credentials.AWS.ExternalID != "" {
+			data["external_id"] = credentials.AWS.ExternalID
+		}
+		if credentials.AWS.RoleSessionName != "" {
+			data["role_session_name"] = credentials.AWS.RoleSessionName
+		}
+		if credentials.AWS.SourceIdentity != "" {
+			data["source_identity"] = credentials.AWS.SourceIdentity
+		}
 		return &providerv1.Credentials{
-			Auth: &providerv1.Credentials_GcpServiceAccount{
-				GcpServiceAccount: &providerv1.GcpServiceAccountCredentials{
-					ProjectId:    credentials.GCP.ProjectID,
-					ClientEmail:  credentials.GCP.ClientEmail,
-					PrivateKey:   credentials.GCP.PrivateKey,
-					PrivateKeyId: credentials.GCP.PrivateKeyID,
-				},
-			},
+			AuthMethod: authMethod,
+			Data:       toProtoProviderConfig(data),
 		}
 	default:
 		return &providerv1.Credentials{}
@@ -85,20 +85,31 @@ func toDomainMetadata(metadata *providerv1.ProviderMetadata) provider.Metadata {
 		return provider.Metadata{}
 	}
 
-	authSchemes := make([]provider.AuthScheme, 0, len(metadata.GetSupportedAuthSchemes()))
-	for _, scheme := range metadata.GetSupportedAuthSchemes() {
-		authSchemes = append(authSchemes, toDomainAuthScheme(scheme))
-	}
-
 	return provider.Metadata{
 		Name:              metadata.GetName(),
 		Version:           metadata.GetVersion(),
-		Cloud:             toDomainCloud(metadata.GetCloud()),
-		SupportedAuth:     authSchemes,
+		Cloud:             metadata.GetCloud(),
+		AuthMethods:       toDomainAuthMethods(metadata.GetAuthMethods()),
 		SupportedServices: metadata.GetSupportedServices(),
 		Capabilities:      metadata.GetCapabilities(),
 		ResourcePlanes:    toDomainResourcePlanes(metadata.GetResourcePlanes()),
 	}
+}
+
+func toDomainAuthMethods(methods []*providerv1.ProviderAuthMethod) []provider.AuthMethod {
+	result := make([]provider.AuthMethod, 0, len(methods))
+	for _, method := range methods {
+		if method == nil {
+			continue
+		}
+		result = append(result, provider.AuthMethod{
+			Name:        method.GetName(),
+			DisplayName: method.GetDisplayName(),
+			Description: method.GetDescription(),
+			Fields:      toDomainSchemaAttributes(method.GetFields()),
+		})
+	}
+	return result
 }
 
 func toDomainResourceSchemas(resources []*providerv1.ProviderResourceSchema) []provider.ResourceSchema {
@@ -538,30 +549,4 @@ func toDomainSpotData(item *providerv1.SpotData) (provider.SpotData, error) {
 	}
 
 	return result, nil
-}
-
-func toDomainCloud(cloud providerv1.Cloud) provider.Cloud {
-	switch cloud {
-	case providerv1.Cloud_CLOUD_AWS:
-		return provider.CloudAWS
-	case providerv1.Cloud_CLOUD_AZURE:
-		return provider.CloudAzure
-	case providerv1.Cloud_CLOUD_GCP:
-		return provider.CloudGCP
-	default:
-		return ""
-	}
-}
-
-func toDomainAuthScheme(scheme providerv1.AuthScheme) provider.AuthScheme {
-	switch scheme {
-	case providerv1.AuthScheme_AUTH_SCHEME_AWS_IAM:
-		return provider.AuthSchemeAWSIAM
-	case providerv1.AuthScheme_AUTH_SCHEME_AZURE_CLIENT_SECRET:
-		return provider.AuthSchemeAzureClientSecret
-	case providerv1.AuthScheme_AUTH_SCHEME_GCP_SERVICE_ACCOUNT:
-		return provider.AuthSchemeGCPServiceAccount
-	default:
-		return ""
-	}
 }

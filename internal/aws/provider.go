@@ -35,8 +35,8 @@ func (s *Service) Metadata(context.Context) (provider.Metadata, error) {
 	return provider.Metadata{
 		Name:              "arco-provider-aws",
 		Version:           s.version,
-		Cloud:             provider.CloudAWS,
-		SupportedAuth:     []provider.AuthScheme{provider.AuthSchemeAWSIAM},
+		Cloud:             string(provider.CloudAWS),
+		AuthMethods:       awsAuthMethods(),
 		SupportedServices: []string{"location", "spot", "compute", "catalog", "pricing"},
 		Capabilities: map[string]string{
 			"transport":   "grpc",

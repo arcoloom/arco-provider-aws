@@ -1,6 +1,7 @@
 package grpcserver
 
 import (
+	"strings"
 	"time"
 
 	providerv1 "github.com/arcoloom/arco-proto/gen/go/arcoloom/provider/v1"
@@ -9,20 +10,28 @@ import (
 )
 
 func toProtoMetadata(metadata provider.Metadata) *providerv1.ProviderMetadata {
-	authSchemes := make([]providerv1.AuthScheme, 0, len(metadata.SupportedAuth))
-	for _, scheme := range metadata.SupportedAuth {
-		authSchemes = append(authSchemes, toProtoAuthScheme(scheme))
-	}
-
 	return &providerv1.ProviderMetadata{
-		Name:                 metadata.Name,
-		Version:              metadata.Version,
-		Cloud:                toProtoCloud(metadata.Cloud),
-		SupportedAuthSchemes: authSchemes,
-		SupportedServices:    metadata.SupportedServices,
-		Capabilities:         metadata.Capabilities,
-		ResourcePlanes:       toProtoResourcePlanes(metadata.ResourcePlanes),
+		Name:              metadata.Name,
+		Version:           metadata.Version,
+		Cloud:             metadata.Cloud,
+		AuthMethods:       toProtoAuthMethods(metadata.AuthMethods),
+		SupportedServices: metadata.SupportedServices,
+		Capabilities:      metadata.Capabilities,
+		ResourcePlanes:    toProtoResourcePlanes(metadata.ResourcePlanes),
 	}
+}
+
+func toProtoAuthMethods(methods []provider.AuthMethod) []*providerv1.ProviderAuthMethod {
+	result := make([]*providerv1.ProviderAuthMethod, 0, len(methods))
+	for _, method := range methods {
+		result = append(result, &providerv1.ProviderAuthMethod{
+			Name:        method.Name,
+			DisplayName: method.DisplayName,
+			Description: method.Description,
+			Fields:      toProtoSchemaAttributes(method.Fields),
+		})
+	}
+	return result
 }
 
 func toProtoResourceSchemas(resources []provider.ResourceSchema) []*providerv1.ProviderResourceSchema {
@@ -371,34 +380,46 @@ func toDomainCredentials(credentials *providerv1.Credentials) provider.Credentia
 		return provider.Credentials{}
 	}
 
-	result := provider.Credentials{}
+	data := map[string]any{}
+	if credentials.GetData() != nil {
+		data = credentials.GetData().AsMap()
+	}
 
-	switch auth := credentials.GetAuth().(type) {
-	case *providerv1.Credentials_AwsIam:
-		result.AWS = &provider.AWSCredentials{
-			AccessKeyID:     auth.AwsIam.GetAccessKeyId(),
-			SecretAccessKey: auth.AwsIam.GetSecretAccessKey(),
-			SessionToken:    auth.AwsIam.GetSessionToken(),
-			RoleARN:         auth.AwsIam.GetRoleArn(),
-			ExternalID:      auth.AwsIam.GetExternalId(),
+	switch strings.TrimSpace(credentials.GetAuthMethod()) {
+	case provider.AuthMethodAWSDefaultCredentials:
+		return provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				UseDefaultCredentialsChain: true,
+				Profile:                    strings.TrimSpace(asString(data["profile"])),
+				RoleARN:                    strings.TrimSpace(asString(data["role_arn"])),
+				ExternalID:                 strings.TrimSpace(asString(data["external_id"])),
+				RoleSessionName:            strings.TrimSpace(asString(data["role_session_name"])),
+				SourceIdentity:             strings.TrimSpace(asString(data["source_identity"])),
+			},
 		}
-	case *providerv1.Credentials_AzureClientSecret:
-		result.Azure = &provider.AzureCredentials{
-			TenantID:       auth.AzureClientSecret.GetTenantId(),
-			ClientID:       auth.AzureClientSecret.GetClientId(),
-			ClientSecret:   auth.AzureClientSecret.GetClientSecret(),
-			SubscriptionID: auth.AzureClientSecret.GetSubscriptionId(),
+	case provider.AuthMethodAWSStaticAccessKey:
+		return provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     strings.TrimSpace(asString(data["access_key_id"])),
+				SecretAccessKey: strings.TrimSpace(asString(data["secret_access_key"])),
+				SessionToken:    strings.TrimSpace(asString(data["session_token"])),
+			},
 		}
-	case *providerv1.Credentials_GcpServiceAccount:
-		result.GCP = &provider.GCPCredentials{
-			ProjectID:    auth.GcpServiceAccount.GetProjectId(),
-			ClientEmail:  auth.GcpServiceAccount.GetClientEmail(),
-			PrivateKey:   auth.GcpServiceAccount.GetPrivateKey(),
-			PrivateKeyID: auth.GcpServiceAccount.GetPrivateKeyId(),
+	case provider.AuthMethodAWSAssumeRole:
+		return provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     strings.TrimSpace(asString(data["access_key_id"])),
+				SecretAccessKey: strings.TrimSpace(asString(data["secret_access_key"])),
+				SessionToken:    strings.TrimSpace(asString(data["session_token"])),
+				RoleARN:         strings.TrimSpace(asString(data["role_arn"])),
+				ExternalID:      strings.TrimSpace(asString(data["external_id"])),
+				RoleSessionName: strings.TrimSpace(asString(data["role_session_name"])),
+				SourceIdentity:  strings.TrimSpace(asString(data["source_identity"])),
+			},
 		}
 	}
 
-	return result
+	return provider.Credentials{}
 }
 
 func toDomainInstanceTags(tags []*providerv1.InstanceTag) []provider.InstanceTag {
@@ -550,28 +571,11 @@ func toDomainInstanceMarketType(marketType providerv1.InstanceMarketType) provid
 	}
 }
 
-func toProtoCloud(cloud provider.Cloud) providerv1.Cloud {
-	switch cloud {
-	case provider.CloudAWS:
-		return providerv1.Cloud_CLOUD_AWS
-	case provider.CloudAzure:
-		return providerv1.Cloud_CLOUD_AZURE
-	case provider.CloudGCP:
-		return providerv1.Cloud_CLOUD_GCP
+func asString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
 	default:
-		return providerv1.Cloud_CLOUD_UNSPECIFIED
-	}
-}
-
-func toProtoAuthScheme(scheme provider.AuthScheme) providerv1.AuthScheme {
-	switch scheme {
-	case provider.AuthSchemeAWSIAM:
-		return providerv1.AuthScheme_AUTH_SCHEME_AWS_IAM
-	case provider.AuthSchemeAzureClientSecret:
-		return providerv1.AuthScheme_AUTH_SCHEME_AZURE_CLIENT_SECRET
-	case provider.AuthSchemeGCPServiceAccount:
-		return providerv1.AuthScheme_AUTH_SCHEME_GCP_SERVICE_ACCOUNT
-	default:
-		return providerv1.AuthScheme_AUTH_SCHEME_UNSPECIFIED
+		return ""
 	}
 }

@@ -11,8 +11,6 @@ import (
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -31,7 +29,6 @@ const (
 	inventoryStatusLow         = "low"
 	inventoryStatusAvailable   = "available"
 	inventoryStatusUnknown     = "unknown"
-	defaultAssumeRoleSession   = "arco-provider-aws"
 )
 
 type clientFactory interface {
@@ -82,28 +79,9 @@ func (awsClientFactory) NewConfig(ctx context.Context, creds provider.AWSCredent
 		region = defaultAWSRegion
 	}
 
-	loadOptions := []func(*config.LoadOptions) error{
-		config.WithRegion(region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			creds.AccessKeyID,
-			creds.SecretAccessKey,
-			creds.SessionToken,
-		)),
-	}
-
-	if endpoint != "" {
-		targetService := endpointServiceID(endpoint)
-		resolver := awsv2.EndpointResolverWithOptionsFunc(func(service, resolvedRegion string, _ ...interface{}) (awsv2.Endpoint, error) {
-			if resolvedRegion == region && shouldUseCustomEndpoint(service, targetService) {
-				return awsv2.Endpoint{
-					URL:           endpoint,
-					SigningRegion: region,
-				}, nil
-			}
-
-			return awsv2.Endpoint{}, &awsv2.EndpointNotFoundError{}
-		})
-		loadOptions = append(loadOptions, config.WithEndpointResolverWithOptions(resolver))
+	loadOptions, err := buildAWSLoadOptions(creds, region, endpoint)
+	if err != nil {
+		return awsv2.Config{}, err
 	}
 
 	cfg, err := config.LoadDefaultConfig(ctx, loadOptions...)
@@ -112,13 +90,10 @@ func (awsClientFactory) NewConfig(ctx context.Context, creds provider.AWSCredent
 	}
 
 	if roleARN := strings.TrimSpace(creds.RoleARN); roleARN != "" {
-		externalID := strings.TrimSpace(creds.ExternalID)
-		assumeRoleProvider := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), roleARN, func(options *stscreds.AssumeRoleOptions) {
-			options.RoleSessionName = defaultAssumeRoleSession
-			if externalID != "" {
-				options.ExternalID = awsv2.String(externalID)
-			}
-		})
+		assumeRoleProvider, err := buildAssumeRoleProvider(cfg, creds)
+		if err != nil {
+			return awsv2.Config{}, err
+		}
 		cfg.Credentials = awsv2.NewCredentialsCache(assumeRoleProvider)
 	}
 
