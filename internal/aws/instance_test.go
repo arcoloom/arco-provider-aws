@@ -29,6 +29,9 @@ func TestStartInstanceDelegatesToRunner(t *testing.T) {
 	}
 
 	result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+		Context: provider.RequestContext{
+			RequestID: "start-instance:stack-a",
+		},
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
@@ -348,6 +351,9 @@ func TestStartInstanceCreatesEC2InstanceViaAWSSDK(t *testing.T) {
 	}
 
 	result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+		Context: provider.RequestContext{
+			RequestID: "start-instance:stack-a",
+		},
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
@@ -392,6 +398,9 @@ func TestStartInstanceCreatesEC2InstanceViaAWSSDK(t *testing.T) {
 	}
 	if got := awsv2.ToString(ec2Client.runInstancesInput.KeyName); got != "demo-key" {
 		t.Fatalf("unexpected key name: %q", got)
+	}
+	if got := awsv2.ToString(ec2Client.runInstancesInput.ClientToken); got != clientTokenForRequestID("start-instance:stack-a") {
+		t.Fatalf("unexpected client token: %q", got)
 	}
 	if got := awsv2.ToString(ec2Client.runInstancesInput.UserData); got != base64.StdEncoding.EncodeToString([]byte("echo hello")) {
 		t.Fatalf("unexpected user data: %q", got)

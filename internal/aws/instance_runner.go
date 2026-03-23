@@ -2,7 +2,9 @@ package aws
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -312,6 +314,9 @@ func buildRunInstancesInput(
 			},
 		},
 	}
+	if token := clientTokenForRequestID(req.Context.RequestID); token != "" {
+		input.ClientToken = awsv2.String(token)
+	}
 
 	if req.AvailabilityZone != "" {
 		input.Placement = &ec2types.Placement{AvailabilityZone: awsv2.String(req.AvailabilityZone)}
@@ -364,6 +369,15 @@ func buildRunInstancesInput(
 	}
 
 	return input
+}
+
+func clientTokenForRequestID(requestID string) string {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(requestID))
+	return hex.EncodeToString(sum[:])
 }
 
 func buildEC2Tags(req provider.StartInstanceRequest) []ec2types.Tag {
