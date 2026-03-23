@@ -29,7 +29,7 @@ func (s *Server) GetProviderInfo(ctx context.Context, _ *providerv1.GetProviderI
 		return nil, err
 	}
 
-	s.logger.Info("provider info requested", "provider", metadata.Name, "cloud", metadata.Cloud)
+	s.logger.Debug("provider info requested", "provider", metadata.Name, "cloud", metadata.Cloud)
 
 	return &providerv1.GetProviderInfoResponse{
 		Metadata: toProtoMetadata(metadata),
@@ -42,7 +42,7 @@ func (s *Server) GetProviderSchema(ctx context.Context, _ *providerv1.GetProvide
 		return nil, err
 	}
 
-	s.logger.Info("provider schema requested", "resources", len(resources))
+	s.logger.Debug("provider schema requested", "resources", len(resources))
 
 	return &providerv1.GetProviderSchemaResponse{
 		Resources: toProtoResourceSchemas(resources),
@@ -62,7 +62,7 @@ func (s *Server) ValidateConnection(ctx context.Context, req *providerv1.Validat
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"connection validation requested",
 		"request_id", domainReq.Context.RequestID,
 		"accepted", result.Accepted,
@@ -109,7 +109,7 @@ func (s *Server) ListRegions(ctx context.Context, req *providerv1.ListRegionsReq
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"regions listed",
 		"request_id", domainReq.Context.RequestID,
 		"items", len(result.Items),
@@ -136,7 +136,7 @@ func (s *Server) ListAvailabilityZones(ctx context.Context, req *providerv1.List
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"availability zones listed",
 		"request_id", domainReq.Context.RequestID,
 		"region", domainReq.Region,
@@ -166,7 +166,7 @@ func (s *Server) GetSpotData(ctx context.Context, req *providerv1.GetSpotDataReq
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"spot data requested",
 		"request_id", domainReq.Context.RequestID,
 		"instance_types", len(domainReq.InstanceTypes),
@@ -203,7 +203,7 @@ func (s *Server) StartInstance(ctx context.Context, req *providerv1.StartInstanc
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"instance start requested",
 		"request_id", domainReq.Context.RequestID,
 		"stack_name", domainReq.StackName,
@@ -237,7 +237,7 @@ func (s *Server) StopInstance(ctx context.Context, req *providerv1.StopInstanceR
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"instance stop requested",
 		"request_id", domainReq.Context.RequestID,
 		"instance_id", domainReq.InstanceID,
@@ -269,7 +269,7 @@ func (s *Server) ListActiveInstances(ctx context.Context, req *providerv1.ListAc
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"active instances listed",
 		"request_id", domainReq.Context.RequestID,
 		"regions", len(domainReq.Regions),
@@ -277,11 +277,15 @@ func (s *Server) ListActiveInstances(ctx context.Context, req *providerv1.ListAc
 		"instance_types", len(domainReq.InstanceTypes),
 		"tags", len(domainReq.Tags),
 		"items", len(result.Items),
+		"covered_regions", len(result.CoveredRegions),
+		"next_cursor", result.NextCursor,
 	)
 
 	return &providerv1.ListActiveInstancesResponse{
-		Items:    toProtoActiveInstances(result.Items),
-		Warnings: toProtoWarnings(result.Warnings),
+		Items:          toProtoActiveInstances(result.Items),
+		Warnings:       toProtoWarnings(result.Warnings),
+		NextCursor:     result.NextCursor,
+		CoveredRegions: toProtoStringSlice(result.CoveredRegions),
 	}, nil
 }
 
@@ -302,7 +306,7 @@ func (s *Server) ListInstanceTypes(ctx context.Context, req *providerv1.ListInst
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"instance types listed",
 		"request_id", domainReq.Context.RequestID,
 		"region", domainReq.Region,
@@ -330,7 +334,7 @@ func (s *Server) GetInstanceTypeInfo(ctx context.Context, req *providerv1.GetIns
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"instance type info requested",
 		"request_id", domainReq.Context.RequestID,
 		"region", domainReq.Region,
@@ -364,7 +368,7 @@ func (s *Server) GetInstancePrices(ctx context.Context, req *providerv1.GetInsta
 		return nil, err
 	}
 
-	s.logger.Info(
+	s.logger.Debug(
 		"instance prices requested",
 		"request_id", domainReq.Context.RequestID,
 		"region", domainReq.Region,

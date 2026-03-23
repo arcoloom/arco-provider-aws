@@ -273,8 +273,10 @@ type ActiveInstance struct {
 }
 
 type ListActiveInstancesResult struct {
-	Items    []ActiveInstance
-	Warnings []Warning
+	Items          []ActiveInstance
+	Warnings       []Warning
+	NextCursor     string
+	CoveredRegions []string
 }
 
 type PurchaseOption string

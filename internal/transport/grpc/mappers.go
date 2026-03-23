@@ -213,6 +213,24 @@ func toProtoRegions(regions []provider.Region) []*providerv1.CloudRegion {
 	return result
 }
 
+func toProtoStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func toProtoAvailabilityZones(zones []provider.AvailabilityZone) []*providerv1.AvailabilityZone {
 	result := make([]*providerv1.AvailabilityZone, 0, len(zones))
 	for _, zone := range zones {

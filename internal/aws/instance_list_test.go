@@ -82,6 +82,12 @@ func TestListActiveInstancesWithoutFiltersReturnsAllActiveInstancesAcrossAccount
 	if result.Items[0].InstanceID != "i-east-running" || result.Items[1].InstanceID != "i-east-stopped" || result.Items[2].InstanceID != "i-west-running" {
 		t.Fatalf("unexpected item ordering: %+v", result.Items)
 	}
+	if result.NextCursor != "" {
+		t.Fatalf("next cursor = %q, want empty for a full inventory response", result.NextCursor)
+	}
+	if len(result.CoveredRegions) != 2 || result.CoveredRegions[0] != "us-east-1" || result.CoveredRegions[1] != "us-west-2" {
+		t.Fatalf("covered regions = %v, want [us-east-1 us-west-2]", result.CoveredRegions)
+	}
 
 	eastRunning := result.Items[0]
 	if eastRunning.Name != "api-east" || eastRunning.Region != "us-east-1" || eastRunning.AvailabilityZone != "us-east-1a" {
@@ -98,6 +104,141 @@ func TestListActiveInstancesWithoutFiltersReturnsAllActiveInstancesAcrossAccount
 	}
 	if !hasFilter(eastClient.describeInstancesInputs[0].Filters, "instance-state-name", activeInstanceStates...) {
 		t.Fatalf("expected active state filter, got %+v", eastClient.describeInstancesInputs[0].Filters)
+	}
+}
+
+func TestListActiveInstancesIncrementalInventoryScansOneRegionPerCall(t *testing.T) {
+	eastClient := &listInstancesRecordingClient{
+		fakeEC2Client: fakeEC2Client{
+			regionsOutput: &ec2.DescribeRegionsOutput{
+				Regions: []ec2types.Region{
+					{RegionName: awsv2.String("us-east-1")},
+					{RegionName: awsv2.String("us-west-2")},
+				},
+			},
+		},
+		describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			Reservations: []ec2types.Reservation{{
+				Instances: []ec2types.Instance{
+					testInstance("i-east-running", "api-east", "us-east-1a", "use1-az1", "c7g.medium", ec2types.InstanceStateNameRunning, "", nil, nil),
+				},
+			}},
+		},
+	}
+	westClient := &listInstancesRecordingClient{
+		describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			Reservations: []ec2types.Reservation{{
+				Instances: []ec2types.Instance{
+					testInstance("i-west-running", "api-west", "us-west-2b", "usw2-az2", "c7g.medium", ec2types.InstanceStateNameRunning, "", nil, nil),
+				},
+			}},
+		},
+	}
+
+	service := &Service{
+		version: "test",
+		clientFactory: fakeClientFactory{
+			clients: map[string]ec2API{
+				"us-east-1": eastClient,
+				"us-west-2": westClient,
+			},
+		},
+	}
+
+	result, err := service.ListActiveInstances(context.Background(), provider.ListActiveInstancesRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
+		Options: map[string]string{
+			optionIncrementalInventory: "true",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ListActiveInstances returned error: %v", err)
+	}
+
+	if len(result.Items) != 1 || result.Items[0].InstanceID != "i-east-running" {
+		t.Fatalf("items = %+v, want first region slice only", result.Items)
+	}
+	if result.NextCursor != "us-west-2" {
+		t.Fatalf("next cursor = %q, want us-west-2", result.NextCursor)
+	}
+	if len(result.CoveredRegions) != 1 || result.CoveredRegions[0] != "us-east-1" {
+		t.Fatalf("covered regions = %v, want [us-east-1]", result.CoveredRegions)
+	}
+	if len(eastClient.describeInstancesInputs) != 1 || len(westClient.describeInstancesInputs) != 0 {
+		t.Fatalf("expected one DescribeInstances call for east only, got east=%d west=%d", len(eastClient.describeInstancesInputs), len(westClient.describeInstancesInputs))
+	}
+}
+
+func TestListActiveInstancesCursorAdvancesToNextRegion(t *testing.T) {
+	eastClient := &listInstancesRecordingClient{
+		fakeEC2Client: fakeEC2Client{
+			regionsOutput: &ec2.DescribeRegionsOutput{
+				Regions: []ec2types.Region{
+					{RegionName: awsv2.String("us-east-1")},
+					{RegionName: awsv2.String("us-west-2")},
+				},
+			},
+		},
+		describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			Reservations: []ec2types.Reservation{{
+				Instances: []ec2types.Instance{
+					testInstance("i-east-running", "api-east", "us-east-1a", "use1-az1", "c7g.medium", ec2types.InstanceStateNameRunning, "", nil, nil),
+				},
+			}},
+		},
+	}
+	westClient := &listInstancesRecordingClient{
+		describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			Reservations: []ec2types.Reservation{{
+				Instances: []ec2types.Instance{
+					testInstance("i-west-running", "api-west", "us-west-2b", "usw2-az2", "c7g.medium", ec2types.InstanceStateNameRunning, "", nil, nil),
+				},
+			}},
+		},
+	}
+
+	service := &Service{
+		version: "test",
+		clientFactory: fakeClientFactory{
+			clients: map[string]ec2API{
+				"us-east-1": eastClient,
+				"us-west-2": westClient,
+			},
+		},
+	}
+
+	result, err := service.ListActiveInstances(context.Background(), provider.ListActiveInstancesRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
+		Options: map[string]string{
+			optionIncrementalInventory: "true",
+			optionInventoryCursor:      "us-west-2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ListActiveInstances returned error: %v", err)
+	}
+
+	if len(result.Items) != 1 || result.Items[0].InstanceID != "i-west-running" {
+		t.Fatalf("items = %+v, want west slice only", result.Items)
+	}
+	if result.NextCursor != "" {
+		t.Fatalf("next cursor = %q, want empty at the end of the cycle", result.NextCursor)
+	}
+	if len(result.CoveredRegions) != 1 || result.CoveredRegions[0] != "us-west-2" {
+		t.Fatalf("covered regions = %v, want [us-west-2]", result.CoveredRegions)
+	}
+	if len(eastClient.describeInstancesInputs) != 0 || len(westClient.describeInstancesInputs) != 1 {
+		t.Fatalf("expected one DescribeInstances call for west only, got east=%d west=%d", len(eastClient.describeInstancesInputs), len(westClient.describeInstancesInputs))
 	}
 }
 

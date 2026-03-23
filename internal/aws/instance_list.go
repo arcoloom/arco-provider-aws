@@ -16,6 +16,9 @@ import (
 
 var activeInstanceStates = []string{"pending", "running", "stopping", "stopped"}
 
+const optionInventoryCursor = "inventory_cursor"
+const optionIncrementalInventory = "incremental_inventory"
+
 func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActiveInstancesRequest) (provider.ListActiveInstancesResult, error) {
 	req = normalizeListActiveInstancesRequest(req)
 	if err := validateListActiveInstancesRequest(req); err != nil {
@@ -32,13 +35,13 @@ func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActi
 		Config:   cfg,
 		Endpoint: req.Scope.Endpoint,
 	})
-	regions, err := resolveListActiveInstancesRegions(ctx, baseClient, req)
+	scanPlan, err := resolveListActiveInstancesScan(ctx, baseClient, req)
 	if err != nil {
 		return provider.ListActiveInstancesResult{}, err
 	}
 
 	items := make([]provider.ActiveInstance, 0)
-	for _, region := range regions {
+	for _, region := range scanPlan.Regions {
 		regionCfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, region), req.Scope.Endpoint)
 		if err != nil {
 			return provider.ListActiveInstancesResult{}, fmt.Errorf("build ec2 config for region %s: %w", region, err)
@@ -69,7 +72,11 @@ func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActi
 		}
 	})
 
-	return provider.ListActiveInstancesResult{Items: items}, nil
+	return provider.ListActiveInstancesResult{
+		Items:          items,
+		NextCursor:     scanPlan.NextCursor,
+		CoveredRegions: append([]string(nil), scanPlan.CoveredRegions...),
+	}, nil
 }
 
 func validateListActiveInstancesRequest(req provider.ListActiveInstancesRequest) error {
@@ -161,12 +168,75 @@ func effectiveListActiveInstancesBaseRegion(req provider.ListActiveInstancesRequ
 	return effectiveDiscoveryBaseRegion("")
 }
 
-func resolveListActiveInstancesRegions(ctx context.Context, client ec2API, req provider.ListActiveInstancesRequest) ([]string, error) {
-	if len(req.Regions) == 0 || containsAllSelector(req.Regions) {
-		return listAccountRegions(ctx, client)
+type activeInstanceScanPlan struct {
+	Regions        []string
+	CoveredRegions []string
+	NextCursor     string
+}
+
+func resolveListActiveInstancesScan(ctx context.Context, client ec2API, req provider.ListActiveInstancesRequest) (activeInstanceScanPlan, error) {
+	if len(req.Regions) > 0 && !containsAllSelector(req.Regions) {
+		regions := append([]string(nil), req.Regions...)
+		return activeInstanceScanPlan{
+			Regions:        regions,
+			CoveredRegions: regions,
+		}, nil
 	}
 
-	return append([]string(nil), req.Regions...), nil
+	regions, err := listAccountRegions(ctx, client)
+	if err != nil {
+		return activeInstanceScanPlan{}, err
+	}
+	if len(regions) == 0 {
+		return activeInstanceScanPlan{}, nil
+	}
+	if !listActiveInstancesUsesIncrementalInventory(req.Options) {
+		return activeInstanceScanPlan{
+			Regions:        append([]string(nil), regions...),
+			CoveredRegions: append([]string(nil), regions...),
+		}, nil
+	}
+
+	cursor, _ := lookupOptionValue(req.Options, optionInventoryCursor)
+	index := nextActiveInstanceScanIndex(regions, cursor)
+	nextCursor := ""
+	if index+1 < len(regions) {
+		nextCursor = regions[index+1]
+	}
+
+	region := regions[index]
+	return activeInstanceScanPlan{
+		Regions:        []string{region},
+		CoveredRegions: []string{region},
+		NextCursor:     nextCursor,
+	}, nil
+}
+
+func listActiveInstancesUsesIncrementalInventory(options map[string]string) bool {
+	value, ok := lookupOptionValue(options, optionIncrementalInventory)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
+func nextActiveInstanceScanIndex(regions []string, cursor string) int {
+	if len(regions) == 0 {
+		return 0
+	}
+
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 0
+	}
+
+	for index, region := range regions {
+		if strings.EqualFold(region, cursor) {
+			return index
+		}
+	}
+
+	return 0
 }
 
 func listActiveInstancesInRegion(

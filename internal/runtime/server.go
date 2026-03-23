@@ -67,7 +67,7 @@ func (s *Server) ListenAndServe() error {
 	)
 	providerv1.RegisterProviderServiceServer(grpcServer, grpcserver.NewServer(s.logger, s.service))
 
-	s.logger.Info("grpc server started", "address", startupInfo.Address, "port", startupInfo.Port)
+	s.logger.Debug("grpc server started", "address", startupInfo.Address, "port", startupInfo.Port)
 
 	if err := grpcServer.Serve(listener); err != nil {
 		return fmt.Errorf("serve grpc: %w", err)

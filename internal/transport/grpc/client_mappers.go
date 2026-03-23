@@ -368,8 +368,10 @@ func toDomainListActiveInstancesResult(resp *providerv1.ListActiveInstancesRespo
 	}
 
 	return provider.ListActiveInstancesResult{
-		Items:    items,
-		Warnings: warnings,
+		Items:          items,
+		Warnings:       warnings,
+		NextCursor:     resp.GetNextCursor(),
+		CoveredRegions: append([]string(nil), resp.GetCoveredRegions()...),
 	}, nil
 }
 
