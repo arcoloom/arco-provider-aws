@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go"
 )
 
 func TestGetSpotDataSingleRegionAndAZ(t *testing.T) {
@@ -270,10 +272,12 @@ type fakeEC2Client struct {
 	availabilityZonesOutput     *ec2.DescribeAvailabilityZonesOutput
 	availabilityZonesErr        error
 	imagesOutput                *ec2.DescribeImagesOutput
+	instanceTypeOfferingsErr    error
 	instanceTypeOfferingsOutput *ec2.DescribeInstanceTypeOfferingsOutput
 	internetGatewaysOutput      *ec2.DescribeInternetGatewaysOutput
 	routeTablesOutput           *ec2.DescribeRouteTablesOutput
 	securityGroupsOutput        *ec2.DescribeSecurityGroupsOutput
+	spotPriceHistoryErr         error
 	spotPriceHistoryOutput      *ec2.DescribeSpotPriceHistoryOutput
 	spotPlacementScoresOutput   map[string]*ec2.GetSpotPlacementScoresOutput
 	subnetsOutput               *ec2.DescribeSubnetsOutput
@@ -363,6 +367,9 @@ func (f fakeEC2Client) DescribeAvailabilityZones(context.Context, *ec2.DescribeA
 }
 
 func (f fakeEC2Client) DescribeInstanceTypeOfferings(context.Context, *ec2.DescribeInstanceTypeOfferingsInput, ...func(*ec2.Options)) (*ec2.DescribeInstanceTypeOfferingsOutput, error) {
+	if f.instanceTypeOfferingsErr != nil {
+		return nil, f.instanceTypeOfferingsErr
+	}
 	if f.instanceTypeOfferingsOutput == nil {
 		return &ec2.DescribeInstanceTypeOfferingsOutput{}, nil
 	}
@@ -406,6 +413,9 @@ func (f fakeEC2Client) DescribeSecurityGroups(context.Context, *ec2.DescribeSecu
 }
 
 func (f fakeEC2Client) DescribeSpotPriceHistory(context.Context, *ec2.DescribeSpotPriceHistoryInput, ...func(*ec2.Options)) (*ec2.DescribeSpotPriceHistoryOutput, error) {
+	if f.spotPriceHistoryErr != nil {
+		return nil, f.spotPriceHistoryErr
+	}
 	if f.spotPriceHistoryOutput == nil {
 		return &ec2.DescribeSpotPriceHistoryOutput{}, nil
 	}
@@ -457,6 +467,113 @@ func (f fakeEC2Client) RevokeSecurityGroupIngress(context.Context, *ec2.RevokeSe
 
 func (f fakeEC2Client) TerminateInstances(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
 	return &ec2.TerminateInstancesOutput{}, nil
+}
+
+func TestGetSpotDataSkipsRecoverableBatchErrors(t *testing.T) {
+	service := &Service{
+		version: "test",
+		clientFactory: fakeClientFactory{
+			clients: map[string]ec2API{
+				"us-east-1": fakeEC2Client{
+					regionsOutput: &ec2.DescribeRegionsOutput{
+						Regions: []ec2types.Region{
+							{RegionName: awsv2.String("us-east-1")},
+							{RegionName: awsv2.String("us-west-2")},
+						},
+					},
+					availabilityZonesOutput: &ec2.DescribeAvailabilityZonesOutput{
+						AvailabilityZones: []ec2types.AvailabilityZone{
+							{ZoneName: awsv2.String("us-east-1a"), ZoneId: awsv2.String("use1-az1")},
+						},
+					},
+					instanceTypeOfferingsOutput: &ec2.DescribeInstanceTypeOfferingsOutput{
+						InstanceTypeOfferings: []ec2types.InstanceTypeOffering{
+							{InstanceType: ec2types.InstanceType("c7g.large"), Location: awsv2.String("us-east-1a")},
+						},
+					},
+					spotPriceHistoryOutput: &ec2.DescribeSpotPriceHistoryOutput{
+						SpotPriceHistory: []ec2types.SpotPrice{
+							{
+								InstanceType:     ec2types.InstanceType("c7g.large"),
+								AvailabilityZone: awsv2.String("us-east-1a"),
+								SpotPrice:        awsv2.String("0.011000"),
+								Timestamp:        awsv2.Time(time.Date(2026, 3, 13, 1, 2, 3, 0, time.UTC)),
+							},
+						},
+					},
+				},
+				"us-west-2": fakeEC2Client{
+					availabilityZonesOutput: &ec2.DescribeAvailabilityZonesOutput{
+						AvailabilityZones: []ec2types.AvailabilityZone{
+							{ZoneName: awsv2.String("us-west-2a"), ZoneId: awsv2.String("usw2-az1")},
+						},
+					},
+					instanceTypeOfferingsErr: &smithy.GenericAPIError{
+						Code:    "InvalidParameterValue",
+						Message: "unsupported instance type in region",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := service.GetSpotData(context.Background(), provider.GetSpotDataRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
+		InstanceTypes: []string{"c7g.large"},
+		Options: map[string]string{
+			optionRegions: "us-east-1, us-west-2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetSpotData returned error: %v", err)
+	}
+
+	if len(result.Items) != 1 {
+		t.Fatalf("expected 1 item after skipping recoverable failure, got %d", len(result.Items))
+	}
+	if result.Items[0].Region != "us-east-1" {
+		t.Fatalf("unexpected spot result after partial failure: %+v", result.Items)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0].Code != warningCodeMarketBatchSkipped {
+		t.Fatalf("expected recoverable skip warning, got %+v", result.Warnings)
+	}
+}
+
+func TestGetSpotDataReturnsErrorForNonRecoverableBatchFailures(t *testing.T) {
+	service := &Service{
+		version: "test",
+		clientFactory: fakeClientFactory{
+			clients: map[string]ec2API{
+				"us-east-1": fakeEC2Client{
+					availabilityZonesOutput: &ec2.DescribeAvailabilityZonesOutput{
+						AvailabilityZones: []ec2types.AvailabilityZone{
+							{ZoneName: awsv2.String("us-east-1a"), ZoneId: awsv2.String("use1-az1")},
+						},
+					},
+					instanceTypeOfferingsErr: errors.New("dial tcp timeout"),
+				},
+			},
+		},
+	}
+
+	_, err := service.GetSpotData(context.Background(), provider.GetSpotDataRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
+		Region:        "us-east-1",
+		InstanceTypes: []string{"c7g.large"},
+	})
+	if err == nil {
+		t.Fatal("expected non-recoverable batch failure to be returned")
+	}
 }
 
 type fakeSSMClient struct{}

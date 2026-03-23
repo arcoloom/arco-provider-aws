@@ -17,6 +17,7 @@ import (
 const (
 	defaultPricingAPIRegion = "us-east-1"
 	onDemandPriceBatchSize  = 100
+	maxAnyOfFilterLength    = 1024
 )
 
 type awsOnDemandPriceDocument struct {
@@ -77,7 +78,7 @@ func (s *Service) getOnDemandPrices(
 
 	client := s.clientFactory.NewPricing(cfg)
 	results := make(map[string]provider.InstancePrice, len(items))
-	for _, batch := range chunkStrings(items, onDemandPriceBatchSize) {
+	for _, batch := range chunkInstanceTypesForPricing(items, onDemandPriceBatchSize, maxAnyOfFilterLength) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -262,4 +263,51 @@ func findRegionNameAcrossSnapshot(snapshot catalogSnapshot, region string) strin
 		}
 	}
 	return ""
+}
+
+func chunkInstanceTypesForPricing(items []string, maxItems int, maxJoinedLength int) [][]string {
+	if len(items) == 0 {
+		return nil
+	}
+	if maxItems <= 0 {
+		maxItems = len(items)
+	}
+	if maxJoinedLength <= 0 {
+		maxJoinedLength = maxAnyOfFilterLength
+	}
+
+	chunks := make([][]string, 0, (len(items)+maxItems-1)/maxItems)
+	current := make([]string, 0, maxItems)
+	currentLen := 0
+
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		chunks = append(chunks, append([]string(nil), current...))
+		current = current[:0]
+		currentLen = 0
+	}
+
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		addedLen := len(item)
+		if len(current) > 0 {
+			addedLen++
+		}
+		if len(current) >= maxItems || (len(current) > 0 && currentLen+addedLen > maxJoinedLength) {
+			flush()
+		}
+		current = append(current, item)
+		currentLen += len(item)
+		if len(current) > 1 {
+			currentLen++
+		}
+	}
+	flush()
+
+	return chunks
 }

@@ -65,11 +65,10 @@ func (s *Service) WatchMarketFeed(ctx context.Context, req provider.WatchMarketF
 			return err
 		}
 
-		if len(warnings) > 0 {
+		for _, warning := range warnings {
 			if err := emit(provider.WatchMarketFeedEvent{
-				Type:        provider.WatchMarketFeedEventTypeHeartbeat,
-				ResumeToken: resumeToken,
-				Warnings:    warnings,
+				Type:     provider.WatchMarketFeedEventTypeWarning,
+				Warnings: []provider.Warning{warning},
 			}); err != nil {
 				return err
 			}
@@ -120,11 +119,12 @@ func (s *Service) buildMarketSnapshot(ctx context.Context, req provider.WatchMar
 		if err != nil {
 			return nil, nil, err
 		}
-		onDemandOfferings, err := s.buildOnDemandMarketOfferings(ctx, req.Scope, snapshot, account, accountRegions)
+		onDemandOfferings, onDemandWarnings, err := s.buildOnDemandMarketOfferings(ctx, req.Scope, snapshot, account, accountRegions)
 		if err != nil {
 			return nil, nil, err
 		}
 		offerings = append(offerings, onDemandOfferings...)
+		warnings = append(warnings, onDemandWarnings...)
 
 		spotOfferings, spotWarnings, err := s.buildSpotMarketOfferings(ctx, req.Scope, snapshot, account, accountRegions)
 		if err != nil {
@@ -151,8 +151,9 @@ func (s *Service) buildMarketSnapshot(ctx context.Context, req provider.WatchMar
 	return offerings, warnings, nil
 }
 
-func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provider.ConnectionScope, snapshot catalogSnapshot, account routedAWSAccount, allowedRegions []string) ([]provider.MarketOffering, error) {
+func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provider.ConnectionScope, snapshot catalogSnapshot, account routedAWSAccount, allowedRegions []string) ([]provider.MarketOffering, []provider.Warning, error) {
 	items := make([]provider.MarketOffering, 0)
+	warnings := make([]provider.Warning, 0)
 	allowed := buildStringSet(allowedRegions)
 	for _, region := range allowedRegions {
 		if len(allowed) != 0 {
@@ -174,7 +175,11 @@ func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provid
 			defaultCurrency,
 		)
 		if err != nil {
-			return nil, err
+			if shouldSkipMarketRegionError(err) {
+				warnings = append(warnings, marketRegionWarning("on-demand", region, err))
+				continue
+			}
+			return nil, nil, err
 		}
 		for _, price := range prices {
 			record, ok := snapshot.metadataByType[price.InstanceType]
@@ -200,7 +205,7 @@ func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provid
 			})
 		}
 	}
-	return items, nil
+	return items, warnings, nil
 }
 
 func (s *Service) buildSpotMarketOfferings(ctx context.Context, scope provider.ConnectionScope, snapshot catalogSnapshot, account routedAWSAccount, regions []string) ([]provider.MarketOffering, []provider.Warning, error) {
@@ -224,6 +229,10 @@ func (s *Service) buildSpotMarketOfferings(ctx context.Context, scope provider.C
 		availabilityZones, zoneIDToName, zoneWarnings, err := resolveAvailabilityZones(ctx, regionClient, region, nil)
 		warnings = append(warnings, zoneWarnings...)
 		if err != nil {
+			if shouldSkipMarketRegionError(err) {
+				warnings = append(warnings, marketRegionWarning("spot", region, err))
+				continue
+			}
 			return nil, nil, err
 		}
 		batches := chunkStrings(regionTypes, spotMarketBatchSize)
@@ -233,10 +242,18 @@ func (s *Service) buildSpotMarketOfferings(ctx context.Context, scope provider.C
 			}
 			offerings, err := fetchOfferings(ctx, regionClient, batch)
 			if err != nil {
+				if shouldSkipMarketBatchError(err) {
+					warnings = append(warnings, marketBatchWarning(region, batch, "describe_instance_type_offerings", err))
+					continue
+				}
 				return nil, nil, err
 			}
 			prices, err := fetchLatestSpotPrices(ctx, regionClient, batch)
 			if err != nil {
+				if shouldSkipMarketBatchError(err) {
+					warnings = append(warnings, marketBatchWarning(region, batch, "describe_spot_price_history", err))
+					continue
+				}
 				return nil, nil, err
 			}
 			for _, spotItem := range buildSpotItems(region, batch, availabilityZones, offerings, prices, nil) {
@@ -329,6 +346,12 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 	if len(attributes) == 0 {
 		attributes = make(map[string]string)
 	}
+	if architectures := normalizeMarketArchitectures(record.Arch); len(architectures) > 0 {
+		attributes["architectures"] = strings.Join(architectures, ",")
+		if len(architectures) == 1 {
+			attributes["architecture"] = architectures[0]
+		}
+	}
 	attributes["source"] = source
 	attributes["ipv6_supported"] = strconvBool(record.IPv6Support)
 	if strings.TrimSpace(record.GPUModel) != "" {
@@ -347,6 +370,43 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 		attributes["capacity_score"] = strconv.FormatInt(int64(inventory.CapacityScore), 10)
 	}
 	return attributes
+}
+
+func normalizeMarketArchitectures(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		switch normalizeMarketArchitecture(value) {
+		case "x86", "arm64":
+			if _, ok := seen[normalizeMarketArchitecture(value)]; ok {
+				continue
+			}
+			canonical := normalizeMarketArchitecture(value)
+			seen[canonical] = struct{}{}
+			result = append(result, canonical)
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+
+	return result
+}
+
+func normalizeMarketArchitecture(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "x86", "x86_64", "x86-64", "amd64":
+		return "x86"
+	case "arm64", "aarch64":
+		return "arm64"
+	default:
+		return ""
+	}
 }
 
 func availabilityZoneID(zoneIDToName map[string]string, zoneName string) string {

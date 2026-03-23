@@ -213,16 +213,28 @@ func (s *Service) GetSpotData(ctx context.Context, req provider.GetSpotDataReque
 		availabilityZones, zoneIDToName, zoneWarnings, err := resolveAvailabilityZones(ctx, regionClient, region, req.AvailabilityZones)
 		warnings = append(warnings, zoneWarnings...)
 		if err != nil {
+			if shouldSkipMarketRegionError(err) {
+				warnings = append(warnings, marketRegionWarning("spot query", region, err))
+				continue
+			}
 			return provider.GetSpotDataResult{}, err
 		}
 
 		offerings, err := fetchOfferings(ctx, regionClient, req.InstanceTypes)
 		if err != nil {
+			if shouldSkipMarketBatchError(err) {
+				warnings = append(warnings, marketBatchWarning(region, req.InstanceTypes, "describe_instance_type_offerings", err))
+				continue
+			}
 			return provider.GetSpotDataResult{}, err
 		}
 
 		prices, err := fetchLatestSpotPrices(ctx, regionClient, req.InstanceTypes)
 		if err != nil {
+			if shouldSkipMarketBatchError(err) {
+				warnings = append(warnings, marketBatchWarning(region, req.InstanceTypes, "describe_spot_price_history", err))
+				continue
+			}
 			return provider.GetSpotDataResult{}, err
 		}
 
