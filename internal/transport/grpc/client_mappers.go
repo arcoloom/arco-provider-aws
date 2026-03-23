@@ -40,6 +40,52 @@ func toProtoProviderConfig(config map[string]any) *structpb.Struct {
 }
 
 func toProtoCredentials(credentials provider.Credentials) *providerv1.Credentials {
+	if len(credentials.AWSAccounts) != 0 {
+		accounts := make([]any, 0, len(credentials.AWSAccounts))
+		for _, account := range credentials.AWSAccounts {
+			item := map[string]any{
+				"name": account.Name,
+			}
+			switch {
+			case account.Credentials.UseDefaultCredentialsChain:
+				item["auth_method"] = provider.AuthMethodAWSDefaultCredentials
+				if account.Credentials.Profile != "" {
+					item["profile"] = account.Credentials.Profile
+				}
+			case account.Credentials.RoleARN != "":
+				item["auth_method"] = provider.AuthMethodAWSAssumeRole
+				item["access_key_id"] = account.Credentials.AccessKeyID
+				item["secret_access_key"] = account.Credentials.SecretAccessKey
+				if account.Credentials.SessionToken != "" {
+					item["session_token"] = account.Credentials.SessionToken
+				}
+				item["role_arn"] = account.Credentials.RoleARN
+			default:
+				item["auth_method"] = provider.AuthMethodAWSStaticAccessKey
+				item["access_key_id"] = account.Credentials.AccessKeyID
+				item["secret_access_key"] = account.Credentials.SecretAccessKey
+				if account.Credentials.SessionToken != "" {
+					item["session_token"] = account.Credentials.SessionToken
+				}
+			}
+			if account.Credentials.ExternalID != "" {
+				item["external_id"] = account.Credentials.ExternalID
+			}
+			if account.Credentials.RoleSessionName != "" {
+				item["role_session_name"] = account.Credentials.RoleSessionName
+			}
+			if account.Credentials.SourceIdentity != "" {
+				item["source_identity"] = account.Credentials.SourceIdentity
+			}
+			accounts = append(accounts, item)
+		}
+		return &providerv1.Credentials{
+			Data: toProtoProviderConfig(map[string]any{
+				"accounts": accounts,
+			}),
+		}
+	}
+
 	switch {
 	case credentials.AWS != nil:
 		authMethod := provider.AuthMethodAWSStaticAccessKey
@@ -252,6 +298,70 @@ func toDomainListAvailabilityZonesResult(resp *providerv1.ListAvailabilityZonesR
 	}
 }
 
+func toDomainWatchMarketFeedEvent(resp *providerv1.WatchMarketFeedResponse) provider.WatchMarketFeedEvent {
+	if resp == nil {
+		return provider.WatchMarketFeedEvent{}
+	}
+
+	switch event := resp.GetEvent().(type) {
+	case *providerv1.WatchMarketFeedResponse_Begin:
+		return provider.WatchMarketFeedEvent{
+			Type:          provider.WatchMarketFeedEventTypeBegin,
+			SnapshotToken: event.Begin.GetSnapshotToken(),
+		}
+	case *providerv1.WatchMarketFeedResponse_Chunk:
+		return provider.WatchMarketFeedEvent{
+			Type:      provider.WatchMarketFeedEventTypeChunk,
+			Offerings: toDomainMarketOfferings(event.Chunk.GetOfferings()),
+		}
+	case *providerv1.WatchMarketFeedResponse_Commit:
+		return provider.WatchMarketFeedEvent{
+			Type:          provider.WatchMarketFeedEventTypeCommit,
+			SnapshotToken: event.Commit.GetSnapshotToken(),
+			ResumeToken:   event.Commit.GetResumeToken(),
+		}
+	case *providerv1.WatchMarketFeedResponse_Heartbeat:
+		return provider.WatchMarketFeedEvent{
+			Type:        provider.WatchMarketFeedEventTypeHeartbeat,
+			ResumeToken: event.Heartbeat.GetResumeToken(),
+			Warnings:    toDomainWarnings(event.Heartbeat.GetWarnings()),
+		}
+	case *providerv1.WatchMarketFeedResponse_Warning:
+		return provider.WatchMarketFeedEvent{
+			Type: provider.WatchMarketFeedEventTypeWarning,
+			Warnings: []provider.Warning{{
+				Code:    event.Warning.GetCode(),
+				Message: event.Warning.GetMessage(),
+			}},
+		}
+	default:
+		return provider.WatchMarketFeedEvent{}
+	}
+}
+
+func toDomainMarketOfferings(items []*providerv1.MarketOffering) []provider.MarketOffering {
+	result := make([]provider.MarketOffering, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		result = append(result, provider.MarketOffering{
+			AccountID:        item.GetAccountId(),
+			Region:           item.GetRegion(),
+			AvailabilityZone: item.GetAvailabilityZone(),
+			ZoneID:           item.GetZoneId(),
+			InstanceType:     item.GetInstanceType(),
+			PurchaseOption:   toDomainPurchaseOption(item.GetPurchaseOption()),
+			CPUMilli:         item.GetCpuMilli(),
+			MemoryMiB:        item.GetMemoryMib(),
+			GPUCount:         item.GetGpuCount(),
+			HourlyPriceUSD:   item.GetHourlyPriceUsd(),
+			Attributes:       item.GetAttributes(),
+		})
+	}
+	return result
+}
+
 func toDomainGetSpotDataResult(resp *providerv1.GetSpotDataResponse) (provider.GetSpotDataResult, error) {
 	if resp == nil {
 		return provider.GetSpotDataResult{}, nil
@@ -347,6 +457,7 @@ func toDomainListActiveInstancesResult(resp *providerv1.ListActiveInstancesRespo
 			IPv6Addresses:      item.GetIpv6Addresses(),
 			Tags:               toDomainInstanceTags(item.GetTags()),
 			ProviderAttributes: item.GetProviderAttributes(),
+			AccountID:          item.GetAccountId(),
 		}
 		if timestamp := item.GetLaunchTime(); timestamp != "" {
 			launchTime, err := time.Parse(time.RFC3339, timestamp)
@@ -551,4 +662,18 @@ func toDomainSpotData(item *providerv1.SpotData) (provider.SpotData, error) {
 	}
 
 	return result, nil
+}
+
+func toDomainWarnings(items []*providerv1.Warning) []provider.Warning {
+	warnings := make([]provider.Warning, 0, len(items))
+	for _, warning := range items {
+		if warning == nil {
+			continue
+		}
+		warnings = append(warnings, provider.Warning{
+			Code:    warning.GetCode(),
+			Message: warning.GetMessage(),
+		})
+	}
+	return warnings
 }

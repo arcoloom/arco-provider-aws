@@ -101,7 +101,7 @@ func TestProviderProcessLifecycleAndBusinessCalls(t *testing.T) {
 	if !validateResp.Accepted {
 		t.Fatalf("expected validation success, got %+v", validateResp)
 	}
-	if !strings.Contains(validateResp.Message, "123456789012") || !strings.Contains(validateResp.Message, "us-east-1") {
+	if !strings.Contains(validateResp.Message, "us-east-1") {
 		t.Fatalf("unexpected validation message: %s", validateResp.Message)
 	}
 	if len(validateResp.Warnings) != 0 {

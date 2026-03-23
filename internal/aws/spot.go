@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
@@ -34,6 +35,7 @@ const (
 type clientFactory interface {
 	NewConfig(context.Context, provider.AWSCredentials, string, string) (awsv2.Config, error)
 	NewEC2(ec2ClientOptions) ec2API
+	NewPricing(awsv2.Config) pricingAPI
 	NewSSM(awsv2.Config) ssmAPI
 	NewSTS(awsv2.Config) stsAPI
 }
@@ -84,6 +86,10 @@ type stsAPI interface {
 	GetCallerIdentity(context.Context, *sts.GetCallerIdentityInput, ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
 }
 
+type pricingAPI interface {
+	GetProducts(context.Context, *pricing.GetProductsInput, ...func(*pricing.Options)) (*pricing.GetProductsOutput, error)
+}
+
 type awsClientFactory struct{}
 
 func newAWSClientFactory() clientFactory {
@@ -118,6 +124,10 @@ func (awsClientFactory) NewConfig(ctx context.Context, creds provider.AWSCredent
 
 func (awsClientFactory) NewEC2(options ec2ClientOptions) ec2API {
 	return ec2.NewFromConfig(options.Config)
+}
+
+func (awsClientFactory) NewPricing(cfg awsv2.Config) pricingAPI {
+	return pricing.NewFromConfig(cfg)
 }
 
 func (awsClientFactory) NewSSM(cfg awsv2.Config) ssmAPI {

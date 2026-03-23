@@ -14,91 +14,112 @@ import (
 )
 
 func (s *Service) ListRegions(ctx context.Context, req provider.ListRegionsRequest) (provider.ListRegionsResult, error) {
-	if req.Credentials.AWS == nil {
+	accounts := routeAWSAccounts(req.Credentials, req.Scope)
+	if len(accounts) == 0 {
 		return provider.ListRegionsResult{}, errors.New("aws iam credentials are required")
 	}
 
-	baseRegion := effectiveDiscoveryBaseRegion("")
-	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
-	if err != nil {
-		return provider.ListRegionsResult{}, err
-	}
-
-	regions, err := listAccountRegions(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
-		Config:   cfg,
-		Endpoint: req.Scope.Endpoint,
-	}))
-	if err != nil {
-		return provider.ListRegionsResult{}, err
-	}
-
 	nameByCode := s.regionNameLookup(ctx)
-	items := make([]provider.Region, 0, len(regions))
-	for _, code := range regions {
-		name := strings.TrimSpace(nameByCode[code])
-		if name == "" {
-			name = code
+	items := make([]provider.Region, 0)
+	seen := make(map[string]struct{})
+	for _, account := range accounts {
+		baseRegion := effectiveDiscoveryBaseRegion("")
+		cfg, err := s.clientFactory.NewConfig(ctx, account.Credentials, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
+		if err != nil {
+			return provider.ListRegionsResult{}, err
 		}
-		items = append(items, provider.Region{
-			Code: code,
-			Name: name,
-		})
+
+		regions, err := listAccountRegions(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
+			Config:   cfg,
+			Endpoint: req.Scope.Endpoint,
+		}))
+		if err != nil {
+			return provider.ListRegionsResult{}, err
+		}
+
+		for _, code := range regions {
+			if _, ok := seen[code]; ok {
+				continue
+			}
+			seen[code] = struct{}{}
+			name := strings.TrimSpace(nameByCode[code])
+			if name == "" {
+				name = code
+			}
+			items = append(items, provider.Region{
+				Code: code,
+				Name: name,
+			})
+		}
 	}
+	slices.SortFunc(items, func(left, right provider.Region) int {
+		return strings.Compare(left.Code, right.Code)
+	})
 
 	return provider.ListRegionsResult{Items: items}, nil
 }
 
 func (s *Service) ListAvailabilityZones(ctx context.Context, req provider.ListAvailabilityZonesRequest) (provider.ListAvailabilityZonesResult, error) {
-	if req.Credentials.AWS == nil {
+	accounts := routeAWSAccounts(req.Credentials, req.Scope)
+	if len(accounts) == 0 {
 		return provider.ListAvailabilityZonesResult{}, errors.New("aws iam credentials are required")
-	}
-
-	baseRegion := effectiveDiscoveryBaseRegion(req.Region)
-	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
-	if err != nil {
-		return provider.ListAvailabilityZonesResult{}, err
-	}
-
-	baseClient := s.clientFactory.NewEC2(ec2ClientOptions{
-		Config:   cfg,
-		Endpoint: req.Scope.Endpoint,
-	})
-	regions, err := resolveAccountRegions(ctx, baseClient, req.Region)
-	if err != nil {
-		return provider.ListAvailabilityZonesResult{}, err
 	}
 
 	items := make([]provider.AvailabilityZone, 0)
 	warnings := make([]provider.Warning, 0)
-	for _, region := range regions {
-		regionCfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, region), req.Scope.Endpoint)
-		if err != nil {
-			return provider.ListAvailabilityZonesResult{}, fmt.Errorf("build ec2 config for region %s: %w", region, err)
-		}
-
-		availabilityZones, err := describeAvailabilityZones(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
-			Config:   regionCfg,
-			Endpoint: req.Scope.Endpoint,
-		}), region)
+	seen := make(map[string]struct{})
+	for _, account := range accounts {
+		baseRegion := effectiveDiscoveryBaseRegion(req.Region)
+		cfg, err := s.clientFactory.NewConfig(ctx, account.Credentials, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
 		if err != nil {
 			return provider.ListAvailabilityZonesResult{}, err
 		}
 
-		selected, _, zoneWarnings := selectAvailabilityZones(region, availabilityZones, req.AvailabilityZones)
-		warnings = append(warnings, zoneWarnings...)
-		for _, zone := range selected {
-			items = append(items, provider.AvailabilityZone{
-				Name:               awsv2.ToString(zone.ZoneName),
-				ZoneID:             awsv2.ToString(zone.ZoneId),
-				Region:             region,
-				State:              string(zone.State),
-				ZoneType:           awsv2.ToString(zone.ZoneType),
-				GroupName:          awsv2.ToString(zone.GroupName),
-				NetworkBorderGroup: awsv2.ToString(zone.NetworkBorderGroup),
-				ParentZoneID:       awsv2.ToString(zone.ParentZoneId),
-				ParentZoneName:     awsv2.ToString(zone.ParentZoneName),
-				OptInStatus:        string(zone.OptInStatus),
-			})
+		baseClient := s.clientFactory.NewEC2(ec2ClientOptions{
+			Config:   cfg,
+			Endpoint: req.Scope.Endpoint,
+		})
+		regions, err := resolveAccountRegions(ctx, baseClient, req.Region)
+		if err != nil {
+			return provider.ListAvailabilityZonesResult{}, err
+		}
+
+		for _, region := range regions {
+			regionCfg, err := s.clientFactory.NewConfig(ctx, account.Credentials, effectiveEndpointRegion(req.Scope, region), req.Scope.Endpoint)
+			if err != nil {
+				return provider.ListAvailabilityZonesResult{}, fmt.Errorf("build ec2 config for region %s: %w", region, err)
+			}
+
+			availabilityZones, err := describeAvailabilityZones(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
+				Config:   regionCfg,
+				Endpoint: req.Scope.Endpoint,
+			}), region)
+			if err != nil {
+				return provider.ListAvailabilityZonesResult{}, err
+			}
+
+			selected, _, zoneWarnings := selectAvailabilityZones(region, availabilityZones, req.AvailabilityZones)
+			warnings = append(warnings, zoneWarnings...)
+			for _, zone := range selected {
+				zoneName := awsv2.ToString(zone.ZoneName)
+				key := region + "\x00" + zoneName
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				items = append(items, provider.AvailabilityZone{
+					Name:               zoneName,
+					ZoneID:             awsv2.ToString(zone.ZoneId),
+					Region:             region,
+					State:              string(zone.State),
+					ZoneType:           awsv2.ToString(zone.ZoneType),
+					GroupName:          awsv2.ToString(zone.GroupName),
+					NetworkBorderGroup: awsv2.ToString(zone.NetworkBorderGroup),
+					ParentZoneID:       awsv2.ToString(zone.ParentZoneId),
+					ParentZoneName:     awsv2.ToString(zone.ParentZoneName),
+					OptInStatus:        string(zone.OptInStatus),
+				})
+			}
 		}
 	}
 

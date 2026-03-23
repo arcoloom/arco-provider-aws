@@ -150,6 +150,28 @@ func (s *Server) ListAvailabilityZones(ctx context.Context, req *providerv1.List
 	}, nil
 }
 
+func (s *Server) WatchMarketFeed(req *providerv1.WatchMarketFeedRequest, stream providerv1.ProviderService_WatchMarketFeedServer) error {
+	domainReq := provider.WatchMarketFeedRequest{
+		Context:     toDomainContext(req.GetContext()),
+		Credentials: toDomainCredentials(req.GetCredentials()),
+		Scope:       toDomainScope(req.GetScope()),
+		ResumeToken: req.GetResumeToken(),
+		Options:     req.GetOptions(),
+	}
+
+	return s.service.WatchMarketFeed(stream.Context(), domainReq, func(event provider.WatchMarketFeedEvent) error {
+		s.logger.Debug(
+			"market feed event",
+			"request_id", domainReq.Context.RequestID,
+			"type", event.Type,
+			"offerings", len(event.Offerings),
+			"snapshot_token", event.SnapshotToken,
+			"resume_token", event.ResumeToken,
+		)
+		return stream.Send(toProtoWatchMarketFeedEvent(event))
+	})
+}
+
 func (s *Server) GetSpotData(ctx context.Context, req *providerv1.GetSpotDataRequest) (*providerv1.GetSpotDataResponse, error) {
 	domainReq := provider.GetSpotDataRequest{
 		Context:           toDomainContext(req.GetContext()),
@@ -196,6 +218,7 @@ func (s *Server) StartInstance(ctx context.Context, req *providerv1.StartInstanc
 		Options:          req.GetOptions(),
 		Tags:             toDomainInstanceTags(req.GetTags()),
 		ProviderConfig:   toDomainProviderConfig(req.GetProviderConfig()),
+		AccountID:        req.GetAccountId(),
 	}
 
 	result, err := s.service.StartInstance(ctx, domainReq)
@@ -230,6 +253,7 @@ func (s *Server) StopInstance(ctx context.Context, req *providerv1.StopInstanceR
 		InstanceID:  req.GetInstanceId(),
 		Region:      req.GetRegion(),
 		Options:     req.GetOptions(),
+		AccountID:   req.GetAccountId(),
 	}
 
 	result, err := s.service.StopInstance(ctx, domainReq)
@@ -351,6 +375,7 @@ func (s *Server) GetInstanceTypeInfo(ctx context.Context, req *providerv1.GetIns
 func (s *Server) GetInstancePrices(ctx context.Context, req *providerv1.GetInstancePricesRequest) (*providerv1.GetInstancePricesResponse, error) {
 	domainReq := provider.GetInstancePricesRequest{
 		Context:              toDomainContext(req.GetContext()),
+		Credentials:          toDomainCredentials(req.GetCredentials()),
 		Scope:                toDomainScope(req.GetScope()),
 		Region:               req.GetRegion(),
 		InstanceTypes:        req.GetInstanceTypes(),

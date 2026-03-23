@@ -1,0 +1,374 @@
+package aws
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/arcoloom/arco-provider-aws/internal/provider"
+)
+
+const (
+	defaultMarketFeedRefreshInterval   = 15 * time.Minute
+	defaultMarketFeedHeartbeatInterval = 30 * time.Second
+	marketFeedChunkSize                = 250
+	spotMarketBatchSize                = 200
+	spotMarketBatchDelay               = 200 * time.Millisecond
+)
+
+func (s *Service) WatchMarketFeed(ctx context.Context, req provider.WatchMarketFeedRequest, emit func(provider.WatchMarketFeedEvent) error) error {
+	if req.Credentials.AWS == nil && len(req.Credentials.AWSAccounts) == 0 {
+		return fmt.Errorf("aws iam credentials are required")
+	}
+
+	refreshInterval := defaultMarketFeedRefreshInterval
+	heartbeatInterval := defaultMarketFeedHeartbeatInterval
+
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		snapshotToken := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+		offerings, warnings, err := s.buildMarketSnapshot(ctx, req)
+		if err != nil {
+			return err
+		}
+
+		if err := emit(provider.WatchMarketFeedEvent{
+			Type:          provider.WatchMarketFeedEventTypeBegin,
+			SnapshotToken: snapshotToken,
+		}); err != nil {
+			return err
+		}
+		for offset := 0; offset < len(offerings); offset += marketFeedChunkSize {
+			limit := offset + marketFeedChunkSize
+			if limit > len(offerings) {
+				limit = len(offerings)
+			}
+			if err := emit(provider.WatchMarketFeedEvent{
+				Type:      provider.WatchMarketFeedEventTypeChunk,
+				Offerings: append([]provider.MarketOffering(nil), offerings[offset:limit]...),
+			}); err != nil {
+				return err
+			}
+		}
+		resumeToken := snapshotToken
+		if err := emit(provider.WatchMarketFeedEvent{
+			Type:          provider.WatchMarketFeedEventTypeCommit,
+			SnapshotToken: snapshotToken,
+			ResumeToken:   resumeToken,
+		}); err != nil {
+			return err
+		}
+
+		if len(warnings) > 0 {
+			if err := emit(provider.WatchMarketFeedEvent{
+				Type:        provider.WatchMarketFeedEventTypeHeartbeat,
+				ResumeToken: resumeToken,
+				Warnings:    warnings,
+			}); err != nil {
+				return err
+			}
+		}
+
+		refreshTimer := time.NewTimer(refreshInterval)
+		heartbeatTicker := time.NewTicker(heartbeatInterval)
+		waiting := true
+		for waiting {
+			select {
+			case <-ctx.Done():
+				heartbeatTicker.Stop()
+				refreshTimer.Stop()
+				return nil
+			case <-refreshTimer.C:
+				waiting = false
+			case <-heartbeatTicker.C:
+				if err := emit(provider.WatchMarketFeedEvent{
+					Type:        provider.WatchMarketFeedEventTypeHeartbeat,
+					ResumeToken: resumeToken,
+				}); err != nil {
+					heartbeatTicker.Stop()
+					refreshTimer.Stop()
+					return err
+				}
+			}
+		}
+		heartbeatTicker.Stop()
+		refreshTimer.Stop()
+	}
+}
+
+func (s *Service) buildMarketSnapshot(ctx context.Context, req provider.WatchMarketFeedRequest) ([]provider.MarketOffering, []provider.Warning, error) {
+	snapshot, err := s.catalog.loadCatalog(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	accounts := routeAWSAccounts(req.Credentials, req.Scope)
+	if len(accounts) == 0 {
+		return nil, nil, fmt.Errorf("aws iam credentials are required")
+	}
+
+	offerings := make([]provider.MarketOffering, 0)
+	warnings := make([]provider.Warning, 0)
+	for _, account := range accounts {
+		accountRegions, err := s.listMarketRegionsForAccount(ctx, req.Scope, account)
+		if err != nil {
+			return nil, nil, err
+		}
+		onDemandOfferings, err := s.buildOnDemandMarketOfferings(ctx, req.Scope, snapshot, account, accountRegions)
+		if err != nil {
+			return nil, nil, err
+		}
+		offerings = append(offerings, onDemandOfferings...)
+
+		spotOfferings, spotWarnings, err := s.buildSpotMarketOfferings(ctx, req.Scope, snapshot, account, accountRegions)
+		if err != nil {
+			return nil, nil, err
+		}
+		offerings = append(offerings, spotOfferings...)
+		warnings = append(warnings, spotWarnings...)
+	}
+	slices.SortFunc(offerings, func(left, right provider.MarketOffering) int {
+		switch {
+		case left.AccountID != right.AccountID:
+			return strings.Compare(left.AccountID, right.AccountID)
+		case left.Region != right.Region:
+			return strings.Compare(left.Region, right.Region)
+		case left.AvailabilityZone != right.AvailabilityZone:
+			return strings.Compare(left.AvailabilityZone, right.AvailabilityZone)
+		case left.InstanceType != right.InstanceType:
+			return strings.Compare(left.InstanceType, right.InstanceType)
+		default:
+			return strings.Compare(string(left.PurchaseOption), string(right.PurchaseOption))
+		}
+	})
+
+	return offerings, warnings, nil
+}
+
+func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provider.ConnectionScope, snapshot catalogSnapshot, account routedAWSAccount, allowedRegions []string) ([]provider.MarketOffering, error) {
+	items := make([]provider.MarketOffering, 0)
+	allowed := buildStringSet(allowedRegions)
+	for _, region := range allowedRegions {
+		if len(allowed) != 0 {
+			if _, ok := allowed[normalizeToken(region)]; !ok {
+				continue
+			}
+		}
+		prices, err := s.getOnDemandPrices(
+			ctx,
+			provider.Credentials{AWS: &account.Credentials},
+			scope,
+			snapshot,
+			region,
+			nil,
+			defaultOperatingSystem,
+			defaultTenancy,
+			defaultPreinstalledSoft,
+			defaultLicenseModel,
+			defaultCurrency,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for _, price := range prices {
+			record, ok := snapshot.metadataByType[price.InstanceType]
+			if !ok {
+				continue
+			}
+			priceValue, err := strconv.ParseFloat(strings.TrimSpace(price.Price), 64)
+			if err != nil {
+				continue
+			}
+			items = append(items, provider.MarketOffering{
+				AccountID:        account.AccountID,
+				Region:           price.Region.Code,
+				AvailabilityZone: "",
+				ZoneID:           "",
+				InstanceType:     price.InstanceType,
+				PurchaseOption:   provider.PurchaseOptionOnDemand,
+				CPUMilli:         record.VCPU * 1000,
+				MemoryMiB:        int32(record.Memory * 1024),
+				GPUCount:         int32(record.GPU),
+				HourlyPriceUSD:   priceValue,
+				Attributes:       buildMarketOfferingAttributes(record, "pricing_api", price.Price, price.EffectiveAt, provider.SpotInventory{}),
+			})
+		}
+	}
+	return items, nil
+}
+
+func (s *Service) buildSpotMarketOfferings(ctx context.Context, scope provider.ConnectionScope, snapshot catalogSnapshot, account routedAWSAccount, regions []string) ([]provider.MarketOffering, []provider.Warning, error) {
+	items := make([]provider.MarketOffering, 0)
+	warnings := make([]provider.Warning, 0)
+	for _, region := range regions {
+		regionTypes := marketInstanceTypesForRegion(snapshot, region)
+		if len(regionTypes) == 0 {
+			continue
+		}
+
+		regionCfg, err := s.clientFactory.NewConfig(ctx, account.Credentials, effectiveEndpointRegion(scope, region), scope.Endpoint)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build ec2 config for region %s: %w", region, err)
+		}
+		regionClient := s.clientFactory.NewEC2(ec2ClientOptions{
+			Config:   regionCfg,
+			Endpoint: scope.Endpoint,
+		})
+
+		availabilityZones, zoneIDToName, zoneWarnings, err := resolveAvailabilityZones(ctx, regionClient, region, nil)
+		warnings = append(warnings, zoneWarnings...)
+		if err != nil {
+			return nil, nil, err
+		}
+		batches := chunkStrings(regionTypes, spotMarketBatchSize)
+		for index, batch := range batches {
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			offerings, err := fetchOfferings(ctx, regionClient, batch)
+			if err != nil {
+				return nil, nil, err
+			}
+			prices, err := fetchLatestSpotPrices(ctx, regionClient, batch)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, spotItem := range buildSpotItems(region, batch, availabilityZones, offerings, prices, nil) {
+				record, ok := snapshot.metadataByType[spotItem.InstanceType]
+				if !ok {
+					continue
+				}
+				priceValue, err := strconv.ParseFloat(strings.TrimSpace(spotItem.Price), 64)
+				if err != nil || !spotItem.HasPrice {
+					continue
+				}
+				items = append(items, provider.MarketOffering{
+					AccountID:        account.AccountID,
+					Region:           spotItem.Region,
+					AvailabilityZone: spotItem.AvailabilityZone,
+					ZoneID:           availabilityZoneID(zoneIDToName, spotItem.AvailabilityZone),
+					InstanceType:     spotItem.InstanceType,
+					PurchaseOption:   provider.PurchaseOptionSpot,
+					CPUMilli:         record.VCPU * 1000,
+					MemoryMiB:        int32(record.Memory * 1024),
+					GPUCount:         int32(record.GPU),
+					HourlyPriceUSD:   priceValue,
+					Attributes:       buildMarketOfferingAttributes(record, "spot", spotItem.Price, spotItem.Timestamp, spotItem.Inventory),
+				})
+			}
+			if index == len(batches)-1 {
+				continue
+			}
+			if !sleepWithContextAWS(ctx, spotMarketBatchDelay) {
+				return nil, nil, ctx.Err()
+			}
+		}
+	}
+	return items, warnings, nil
+}
+
+func marketInstanceTypesForRegion(snapshot catalogSnapshot, region string) []string {
+	items := make([]string, 0)
+	for instanceType, supportedRegions := range snapshot.regionsByType {
+		if supportsRegion(supportedRegions, region) {
+			items = append(items, instanceType)
+		}
+	}
+	slices.Sort(items)
+	return items
+}
+
+func (s *Service) listMarketRegionsForAccount(ctx context.Context, scope provider.ConnectionScope, account routedAWSAccount) ([]string, error) {
+	baseRegion := effectiveDiscoveryBaseRegion("")
+	cfg, err := s.clientFactory.NewConfig(ctx, account.Credentials, effectiveEndpointRegion(scope, baseRegion), scope.Endpoint)
+	if err != nil {
+		return nil, err
+	}
+	return listAccountRegions(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
+		Config:   cfg,
+		Endpoint: scope.Endpoint,
+	}))
+}
+
+func chunkStrings(items []string, chunkSize int) [][]string {
+	if chunkSize <= 0 || len(items) == 0 {
+		return [][]string{append([]string(nil), items...)}
+	}
+	chunks := make([][]string, 0, (len(items)+chunkSize-1)/chunkSize)
+	for start := 0; start < len(items); start += chunkSize {
+		end := start + chunkSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunks = append(chunks, append([]string(nil), items[start:end]...))
+	}
+	return chunks
+}
+
+func buildStringSet(items []string) map[string]struct{} {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if trimmed := normalizeToken(item); trimmed != "" {
+			result[trimmed] = struct{}{}
+		}
+	}
+	return result
+}
+
+func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source string, price string, effectiveAt time.Time, inventory provider.SpotInventory) map[string]string {
+	attributes := buildProviderAttributes(record.Raw)
+	if len(attributes) == 0 {
+		attributes = make(map[string]string)
+	}
+	attributes["source"] = source
+	attributes["ipv6_supported"] = strconvBool(record.IPv6Support)
+	if strings.TrimSpace(record.GPUModel) != "" {
+		attributes["gpu_model"] = strings.TrimSpace(record.GPUModel)
+	}
+	if strings.TrimSpace(price) != "" {
+		attributes["spot_price"] = strings.TrimSpace(price)
+	}
+	if !effectiveAt.IsZero() {
+		attributes["price_effective_at"] = effectiveAt.UTC().Format(time.RFC3339)
+	}
+	if inventory.Status != "" {
+		attributes["inventory_status"] = inventory.Status
+	}
+	if inventory.HasCapacityScore {
+		attributes["capacity_score"] = strconv.FormatInt(int64(inventory.CapacityScore), 10)
+	}
+	return attributes
+}
+
+func availabilityZoneID(zoneIDToName map[string]string, zoneName string) string {
+	for zoneID, candidate := range zoneIDToName {
+		if strings.EqualFold(strings.TrimSpace(candidate), strings.TrimSpace(zoneName)) {
+			return strings.TrimSpace(zoneID)
+		}
+	}
+	return ""
+}
+
+func sleepWithContextAWS(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}

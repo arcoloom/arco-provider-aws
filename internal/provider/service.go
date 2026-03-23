@@ -9,6 +9,7 @@ type Service interface {
 	Ping(context.Context, string) (PingResult, error)
 	ListRegions(context.Context, ListRegionsRequest) (ListRegionsResult, error)
 	ListAvailabilityZones(context.Context, ListAvailabilityZonesRequest) (ListAvailabilityZonesResult, error)
+	WatchMarketFeed(context.Context, WatchMarketFeedRequest, func(WatchMarketFeedEvent) error) error
 	GetSpotData(context.Context, GetSpotDataRequest) (GetSpotDataResult, error)
 	StartInstance(context.Context, StartInstanceRequest) (StartInstanceResult, error)
 	StopInstance(context.Context, StopInstanceRequest) (StopInstanceResult, error)

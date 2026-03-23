@@ -93,8 +93,14 @@ type AWSCredentials struct {
 	SourceIdentity             string
 }
 
+type AWSAccount struct {
+	Name        string
+	Credentials AWSCredentials
+}
+
 type Credentials struct {
-	AWS *AWSCredentials
+	AWS         *AWSCredentials
+	AWSAccounts []AWSAccount
 }
 
 type ValidateConnectionRequest struct {
@@ -159,6 +165,46 @@ type ListAvailabilityZonesResult struct {
 	Warnings []Warning
 }
 
+type WatchMarketFeedRequest struct {
+	Context     RequestContext
+	Credentials Credentials
+	Scope       ConnectionScope
+	ResumeToken string
+	Options     map[string]string
+}
+
+type MarketOffering struct {
+	AccountID        string
+	Region           string
+	AvailabilityZone string
+	ZoneID           string
+	InstanceType     string
+	PurchaseOption   PurchaseOption
+	CPUMilli         int32
+	MemoryMiB        int32
+	GPUCount         int32
+	HourlyPriceUSD   float64
+	Attributes       map[string]string
+}
+
+type WatchMarketFeedEventType string
+
+const (
+	WatchMarketFeedEventTypeBegin     WatchMarketFeedEventType = "begin"
+	WatchMarketFeedEventTypeChunk     WatchMarketFeedEventType = "chunk"
+	WatchMarketFeedEventTypeCommit    WatchMarketFeedEventType = "commit"
+	WatchMarketFeedEventTypeHeartbeat WatchMarketFeedEventType = "heartbeat"
+	WatchMarketFeedEventTypeWarning   WatchMarketFeedEventType = "warning"
+)
+
+type WatchMarketFeedEvent struct {
+	Type          WatchMarketFeedEventType
+	SnapshotToken string
+	ResumeToken   string
+	Offerings     []MarketOffering
+	Warnings      []Warning
+}
+
 type GetSpotDataRequest struct {
 	Context           RequestContext
 	Credentials       Credentials
@@ -218,6 +264,7 @@ type StartInstanceRequest struct {
 	Options          map[string]string
 	Tags             []InstanceTag
 	ProviderConfig   map[string]any
+	AccountID        string
 }
 
 type StartInstanceResult struct {
@@ -237,6 +284,7 @@ type StopInstanceRequest struct {
 	InstanceID  string
 	Region      string
 	Options     map[string]string
+	AccountID   string
 }
 
 type StopInstanceResult struct {
@@ -270,6 +318,7 @@ type ActiveInstance struct {
 	LaunchTime         time.Time
 	Tags               []InstanceTag
 	ProviderAttributes map[string]string
+	AccountID          string
 }
 
 type ListActiveInstancesResult struct {
@@ -380,6 +429,7 @@ type GetInstanceTypeInfoResult struct {
 
 type GetInstancePricesRequest struct {
 	Context              RequestContext
+	Credentials          Credentials
 	Scope                ConnectionScope
 	Region               string
 	InstanceTypes        []string

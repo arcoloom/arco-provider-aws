@@ -37,12 +37,13 @@ func (s *Service) Metadata(context.Context) (provider.Metadata, error) {
 		Version:           s.version,
 		Cloud:             string(provider.CloudAWS),
 		AuthMethods:       awsAuthMethods(),
-		SupportedServices: []string{"location", "spot", "compute", "catalog", "pricing"},
+		SupportedServices: []string{"location", "spot", "compute", "catalog", "pricing", "market"},
 		Capabilities: map[string]string{
-			"transport":   "grpc",
-			"runtime":     "provider",
-			"extensible":  "true",
-			"schema_mode": "provider-defined",
+			"transport":      "grpc",
+			"runtime":        "provider",
+			"extensible":     "true",
+			"schema_mode":    "provider-defined",
+			"market_feed_v1": "stream_snapshot",
 		},
 		ResourcePlanes: []provider.ResourcePlane{provider.ResourcePlaneCompute},
 	}, nil
@@ -55,59 +56,57 @@ func (s *Service) Schema(context.Context) ([]provider.ResourceSchema, error) {
 const warningCodeRegionValidationSkipped = "REGION_VALIDATION_SKIPPED"
 
 func (s *Service) ValidateConnection(ctx context.Context, req provider.ValidateConnectionRequest) (provider.ValidateConnectionResult, error) {
-	if req.Credentials.AWS == nil {
+	accounts := routeAWSAccounts(req.Credentials, req.Scope)
+	if len(accounts) == 0 {
 		return rejectedValidation("aws iam credentials are required"), nil
 	}
 
-	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, defaultAWSRegion), req.Scope.Endpoint)
-	if err != nil {
-		return rejectedValidation(fmt.Sprintf("build aws client config: %v", err)), nil
-	}
-
-	identity, err := s.clientFactory.NewSTS(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-	if err != nil {
-		return rejectedValidation(fmt.Sprintf("validate aws caller identity: %v", err)), nil
-	}
-
-	accountID := strings.TrimSpace(awsv2.ToString(identity.Account))
-	if accountID == "" {
-		return rejectedValidation("validate aws caller identity: STS returned an empty account id"), nil
-	}
-
-	expectedAccountID := strings.TrimSpace(req.Scope.AccountID)
-	if expectedAccountID != "" && expectedAccountID != accountID {
-		return rejectedValidation(fmt.Sprintf(
-			"validated aws account %s does not match requested scope account %s",
-			accountID,
-			expectedAccountID,
-		)), nil
-	}
-
 	warnings := make([]provider.Warning, 0, 1)
-	region := strings.TrimSpace(cfg.Region)
-	ec2Client := s.clientFactory.NewEC2(ec2ClientOptions{
-		Config:   cfg,
-		Endpoint: req.Scope.Endpoint,
-	})
-	if err := validateRegionAccess(ctx, ec2Client); err != nil {
-		if isRegionDescribePermissionError(err) {
-			warnings = append(warnings, provider.Warning{
-				Code: warningCodeRegionValidationSkipped,
-				Message: fmt.Sprintf(
-					"validated caller identity for account %s, but could not verify EC2 read access in region %s because DescribeAvailabilityZones was denied: %v",
-					accountID,
-					region,
-					err,
-				),
-			})
-		} else {
+	regionsValidated := make(map[string]struct{})
+	for _, account := range accounts {
+		cfg, err := s.clientFactory.NewConfig(ctx, account.Credentials, effectiveEndpointRegion(req.Scope, defaultAWSRegion), req.Scope.Endpoint)
+		if err != nil {
+			return rejectedValidation(fmt.Sprintf("build aws client config: %v", err)), nil
+		}
+
+		identity, err := s.clientFactory.NewSTS(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+		if err != nil {
+			return rejectedValidation(fmt.Sprintf("validate aws caller identity: %v", err)), nil
+		}
+		if strings.TrimSpace(awsv2.ToString(identity.Account)) == "" {
+			return rejectedValidation("validate aws caller identity: STS returned an empty account id"), nil
+		}
+
+		region := strings.TrimSpace(cfg.Region)
+		regionsValidated[region] = struct{}{}
+		ec2Client := s.clientFactory.NewEC2(ec2ClientOptions{
+			Config:   cfg,
+			Endpoint: req.Scope.Endpoint,
+		})
+		if err := validateRegionAccess(ctx, ec2Client); err != nil {
+			if isRegionDescribePermissionError(err) {
+				warnings = append(warnings, provider.Warning{
+					Code: warningCodeRegionValidationSkipped,
+					Message: fmt.Sprintf(
+						"validated aws credentials, but could not verify EC2 read access in region %s because DescribeAvailabilityZones was denied: %v",
+						region,
+						err,
+					),
+				})
+				continue
+			}
 			return rejectedValidation(fmt.Sprintf("validate EC2 region %s: %v", region, err)), nil
 		}
 	}
 
+	region := defaultAWSRegion
+	for candidate := range regionsValidated {
+		region = candidate
+		break
+	}
 	return provider.ValidateConnectionResult{
 		Accepted: true,
-		Message:  fmt.Sprintf("validated aws credentials for account %s in region %s", accountID, region),
+		Message:  fmt.Sprintf("validated aws credentials in region %s", region),
 		Warnings: warnings,
 	}, nil
 }

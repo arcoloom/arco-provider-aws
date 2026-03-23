@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
+	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 )
 
 func TestListInstanceTypesFiltersByRegionFromCatalog(t *testing.T) {
-	service := newCatalogBackedTestService(t, newStaticCatalogFetcher())
+	service := newCatalogBackedTestService(t, newStaticCatalogFetcher(), &fakePricingClient{})
 
 	result, err := service.ListInstanceTypes(context.Background(), provider.ListInstanceTypesRequest{
 		Region: "us-west-2",
@@ -32,7 +33,7 @@ func TestListInstanceTypesFiltersByRegionFromCatalog(t *testing.T) {
 }
 
 func TestGetInstanceTypeInfoReturnsStandardizedFields(t *testing.T) {
-	service := newCatalogBackedTestService(t, newStaticCatalogFetcher())
+	service := newCatalogBackedTestService(t, newStaticCatalogFetcher(), &fakePricingClient{})
 
 	result, err := service.GetInstanceTypeInfo(context.Background(), provider.GetInstanceTypeInfoRequest{
 		InstanceTypes: []string{"g5.xlarge"},
@@ -64,7 +65,7 @@ func TestGetInstanceTypeInfoReturnsStandardizedFields(t *testing.T) {
 }
 
 func TestGetInstanceTypeInfoSupportsFractionalGPUCounts(t *testing.T) {
-	service := newCatalogBackedTestService(t, newStaticCatalogFetcher())
+	service := newCatalogBackedTestService(t, newStaticCatalogFetcher(), &fakePricingClient{})
 
 	result, err := service.GetInstanceTypeInfo(context.Background(), provider.GetInstanceTypeInfoRequest{
 		InstanceTypes: []string{"g6f.large"},
@@ -91,9 +92,51 @@ func TestGetInstanceTypeInfoSupportsFractionalGPUCounts(t *testing.T) {
 
 func TestGetInstancePricesParsesOnDemandPriceAndUsesCache(t *testing.T) {
 	fetcher := newStaticCatalogFetcher()
-	service := newCatalogBackedTestService(t, fetcher)
+	pricingClient := &fakePricingClient{
+		outputs: []*awspricing.GetProductsOutput{
+			{
+				PriceList: []string{`{
+  "product": {
+    "sku": "sku-c6a-large",
+    "attributes": {
+      "instanceType": "c6a.large",
+      "location": "US East (N. Virginia)",
+      "regionCode": "us-east-1",
+      "operatingSystem": "Linux",
+      "tenancy": "Shared",
+      "preInstalledSw": "NA",
+      "licenseModel": "No License required"
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "sku-c6a-large.JRTCKXETXF": {
+        "effectiveDate": "2026-03-20T04:29:25Z",
+        "priceDimensions": {
+          "sku-c6a-large.JRTCKXETXF.6YS6EN2CT7": {
+            "unit": "Hrs",
+            "description": "$0.068 per On Demand Linux c6a.large Instance Hour",
+            "pricePerUnit": {
+              "USD": "0.0680000000"
+            }
+          }
+        }
+      }
+    }
+  }
+}`},
+			},
+		},
+	}
+	service := newCatalogBackedTestService(t, fetcher, pricingClient)
 
 	first, err := service.GetInstancePrices(context.Background(), provider.GetInstancePricesRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
 		Region:        "us-east-1",
 		InstanceTypes: []string{"c6a.large"},
 	})
@@ -108,21 +151,37 @@ func TestGetInstancePricesParsesOnDemandPriceAndUsesCache(t *testing.T) {
 		t.Fatalf("unexpected price item: %+v", first.Items[0])
 	}
 
-	fetcher.fail = true
-
 	second, err := service.GetInstancePrices(context.Background(), provider.GetInstancePricesRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
 		Region:        "us-east-1",
 		InstanceTypes: []string{"c6a.large"},
 	})
 	if err != nil {
-		t.Fatalf("GetInstancePrices should use cache, got error: %v", err)
+		t.Fatalf("GetInstancePrices returned error on second call: %v", err)
 	}
 	if len(second.Items) != 1 {
-		t.Fatalf("expected cached price item, got %d", len(second.Items))
+		t.Fatalf("expected second price item, got %d", len(second.Items))
 	}
 }
 
-func newCatalogBackedTestService(t *testing.T, fetcher *staticCatalogFetcher) *Service {
+func TestGetInstancePricesRequiresCredentials(t *testing.T) {
+	service := newCatalogBackedTestService(t, newStaticCatalogFetcher(), &fakePricingClient{})
+
+	_, err := service.GetInstancePrices(context.Background(), provider.GetInstancePricesRequest{
+		Region:        "us-east-1",
+		InstanceTypes: []string{"c6a.large"},
+	})
+	if err == nil {
+		t.Fatal("expected credentials error, got nil")
+	}
+}
+
+func newCatalogBackedTestService(t *testing.T, fetcher *staticCatalogFetcher, pricingClient pricingAPI) *Service {
 	t.Helper()
 
 	repo := &catalogRepository{
@@ -132,8 +191,10 @@ func newCatalogBackedTestService(t *testing.T, fetcher *staticCatalogFetcher) *S
 	}
 
 	return &Service{
-		version:        "test",
-		clientFactory:  newAWSClientFactory(),
+		version: "test",
+		clientFactory: fakeClientFactory{
+			pricingClient: pricingClient,
+		},
 		instanceRunner: &fakeInstanceLifecycleRunner{},
 		catalog:        repo,
 	}

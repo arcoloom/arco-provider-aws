@@ -135,6 +135,73 @@ func toProtoWarnings(warnings []provider.Warning) []*providerv1.Warning {
 	return result
 }
 
+func toProtoMarketOfferings(items []provider.MarketOffering) []*providerv1.MarketOffering {
+	result := make([]*providerv1.MarketOffering, 0, len(items))
+	for _, item := range items {
+		result = append(result, &providerv1.MarketOffering{
+			AccountId:        item.AccountID,
+			Region:           item.Region,
+			AvailabilityZone: item.AvailabilityZone,
+			ZoneId:           item.ZoneID,
+			InstanceType:     item.InstanceType,
+			PurchaseOption:   toProtoPurchaseOption(item.PurchaseOption),
+			CpuMilli:         item.CPUMilli,
+			MemoryMib:        item.MemoryMiB,
+			GpuCount:         item.GPUCount,
+			HourlyPriceUsd:   item.HourlyPriceUSD,
+			Attributes:       item.Attributes,
+		})
+	}
+	return result
+}
+
+func toProtoWatchMarketFeedEvent(event provider.WatchMarketFeedEvent) *providerv1.WatchMarketFeedResponse {
+	resp := &providerv1.WatchMarketFeedResponse{}
+	switch event.Type {
+	case provider.WatchMarketFeedEventTypeBegin:
+		resp.Event = &providerv1.WatchMarketFeedResponse_Begin{
+			Begin: &providerv1.MarketFeedBegin{SnapshotToken: event.SnapshotToken},
+		}
+	case provider.WatchMarketFeedEventTypeChunk:
+		resp.Event = &providerv1.WatchMarketFeedResponse_Chunk{
+			Chunk: &providerv1.MarketFeedChunk{Offerings: toProtoMarketOfferings(event.Offerings)},
+		}
+	case provider.WatchMarketFeedEventTypeCommit:
+		resp.Event = &providerv1.WatchMarketFeedResponse_Commit{
+			Commit: &providerv1.MarketFeedCommit{
+				SnapshotToken: event.SnapshotToken,
+				ResumeToken:   event.ResumeToken,
+			},
+		}
+	case provider.WatchMarketFeedEventTypeHeartbeat:
+		resp.Event = &providerv1.WatchMarketFeedResponse_Heartbeat{
+			Heartbeat: &providerv1.MarketFeedHeartbeat{
+				ResumeToken: event.ResumeToken,
+				Warnings:    toProtoWarnings(event.Warnings),
+			},
+		}
+	case provider.WatchMarketFeedEventTypeWarning:
+		var warning provider.Warning
+		if len(event.Warnings) > 0 {
+			warning = event.Warnings[0]
+		}
+		resp.Event = &providerv1.WatchMarketFeedResponse_Warning{
+			Warning: &providerv1.Warning{
+				Code:    warning.Code,
+				Message: warning.Message,
+			},
+		}
+	default:
+		resp.Event = &providerv1.WatchMarketFeedResponse_Heartbeat{
+			Heartbeat: &providerv1.MarketFeedHeartbeat{
+				ResumeToken: event.ResumeToken,
+				Warnings:    toProtoWarnings(event.Warnings),
+			},
+		}
+	}
+	return resp
+}
+
 func toProtoInstanceTags(tags []provider.InstanceTag) []*providerv1.InstanceTag {
 	result := make([]*providerv1.InstanceTag, 0, len(tags))
 	for _, tag := range tags {
@@ -190,6 +257,7 @@ func toProtoActiveInstances(items []provider.ActiveInstance) []*providerv1.Activ
 			Ipv6Addresses:      item.IPv6Addresses,
 			Tags:               toProtoInstanceTags(item.Tags),
 			ProviderAttributes: item.ProviderAttributes,
+			AccountId:          item.AccountID,
 		}
 		if !item.LaunchTime.IsZero() {
 			protoItem.LaunchTime = item.LaunchTime.Format(time.RFC3339)
@@ -403,6 +471,14 @@ func toDomainCredentials(credentials *providerv1.Credentials) provider.Credentia
 		data = credentials.GetData().AsMap()
 	}
 
+	if accounts := toDomainAWSAccounts(data, strings.TrimSpace(credentials.GetAuthMethod())); len(accounts) != 0 {
+		result := provider.Credentials{
+			AWSAccounts: accounts,
+		}
+		result.AWS = &accounts[0].Credentials
+		return result
+	}
+
 	switch strings.TrimSpace(credentials.GetAuthMethod()) {
 	case provider.AuthMethodAWSDefaultCredentials:
 		return provider.Credentials{
@@ -438,6 +514,68 @@ func toDomainCredentials(credentials *providerv1.Credentials) provider.Credentia
 	}
 
 	return provider.Credentials{}
+}
+
+func toDomainAWSAccounts(data map[string]any, fallbackAuthMethod string) []provider.AWSAccount {
+	rawAccounts, ok := data["accounts"]
+	if !ok {
+		return nil
+	}
+
+	items, ok := rawAccounts.([]any)
+	if !ok {
+		return nil
+	}
+
+	result := make([]provider.AWSAccount, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		authMethod := strings.TrimSpace(asString(object["auth_method"]))
+		if authMethod == "" {
+			authMethod = fallbackAuthMethod
+		}
+		account := provider.AWSAccount{
+			Name: strings.TrimSpace(asString(object["name"])),
+		}
+		switch authMethod {
+		case provider.AuthMethodAWSDefaultCredentials:
+			account.Credentials = provider.AWSCredentials{
+				UseDefaultCredentialsChain: true,
+				Profile:                    strings.TrimSpace(asString(object["profile"])),
+				RoleARN:                    strings.TrimSpace(asString(object["role_arn"])),
+				ExternalID:                 strings.TrimSpace(asString(object["external_id"])),
+				RoleSessionName:            strings.TrimSpace(asString(object["role_session_name"])),
+				SourceIdentity:             strings.TrimSpace(asString(object["source_identity"])),
+			}
+		case provider.AuthMethodAWSStaticAccessKey:
+			account.Credentials = provider.AWSCredentials{
+				AccessKeyID:     strings.TrimSpace(asString(object["access_key_id"])),
+				SecretAccessKey: strings.TrimSpace(asString(object["secret_access_key"])),
+				SessionToken:    strings.TrimSpace(asString(object["session_token"])),
+			}
+		case provider.AuthMethodAWSAssumeRole:
+			account.Credentials = provider.AWSCredentials{
+				AccessKeyID:     strings.TrimSpace(asString(object["access_key_id"])),
+				SecretAccessKey: strings.TrimSpace(asString(object["secret_access_key"])),
+				SessionToken:    strings.TrimSpace(asString(object["session_token"])),
+				RoleARN:         strings.TrimSpace(asString(object["role_arn"])),
+				ExternalID:      strings.TrimSpace(asString(object["external_id"])),
+				RoleSessionName: strings.TrimSpace(asString(object["role_session_name"])),
+				SourceIdentity:  strings.TrimSpace(asString(object["source_identity"])),
+			}
+		default:
+			continue
+		}
+		result = append(result, account)
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func toDomainInstanceTags(tags []*providerv1.InstanceTag) []provider.InstanceTag {

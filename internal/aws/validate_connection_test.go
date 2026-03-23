@@ -12,7 +12,7 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-func TestValidateConnectionAcceptsMatchingAccountAndRegion(t *testing.T) {
+func TestValidateConnectionAcceptsOpaqueAccountIDAndRegion(t *testing.T) {
 	service := &Service{
 		version: "test",
 		clientFactory: fakeClientFactory{
@@ -38,7 +38,7 @@ func TestValidateConnectionAcceptsMatchingAccountAndRegion(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "123456789012",
+			AccountID: "acct-prod",
 			Region:    "us-east-1",
 		},
 	})
@@ -51,12 +51,12 @@ func TestValidateConnectionAcceptsMatchingAccountAndRegion(t *testing.T) {
 	if len(result.Warnings) != 0 {
 		t.Fatalf("expected no warnings, got %+v", result.Warnings)
 	}
-	if !strings.Contains(result.Message, "123456789012") || !strings.Contains(result.Message, "us-east-1") {
+	if !strings.Contains(result.Message, "us-east-1") {
 		t.Fatalf("unexpected validation message: %q", result.Message)
 	}
 }
 
-func TestValidateConnectionRejectsAccountMismatch(t *testing.T) {
+func TestValidateConnectionDoesNotCompareOpaqueAccountIDToCloudAccount(t *testing.T) {
 	service := &Service{
 		version: "test",
 		clientFactory: fakeClientFactory{
@@ -81,17 +81,17 @@ func TestValidateConnectionRejectsAccountMismatch(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "999999999999",
+			AccountID: "acct-other",
 			Region:    "us-east-1",
 		},
 	})
 	if err != nil {
 		t.Fatalf("ValidateConnection returned error: %v", err)
 	}
-	if result.Accepted {
-		t.Fatalf("expected validation rejection, got %+v", result)
+	if !result.Accepted {
+		t.Fatalf("expected validation success, got %+v", result)
 	}
-	if !strings.Contains(result.Message, "123456789012") || !strings.Contains(result.Message, "999999999999") {
+	if !strings.Contains(result.Message, "us-east-1") {
 		t.Fatalf("unexpected validation message: %q", result.Message)
 	}
 }
@@ -124,7 +124,7 @@ func TestValidateConnectionAddsWarningWhenRegionReadIsDenied(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "123456789012",
+			AccountID: "acct-prod",
 			Region:    "us-east-1",
 		},
 	})
@@ -167,7 +167,7 @@ func TestValidateConnectionRejectsRegionErrors(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "123456789012",
+			AccountID: "acct-prod",
 			Region:    "us-east-1",
 		},
 	})

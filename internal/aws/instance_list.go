@@ -24,33 +24,27 @@ func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActi
 	if err := validateListActiveInstancesRequest(req); err != nil {
 		return provider.ListActiveInstancesResult{}, err
 	}
-
-	baseRegion := effectiveListActiveInstancesBaseRegion(req)
-	cfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
-	if err != nil {
-		return provider.ListActiveInstancesResult{}, err
+	accounts := routeAWSAccounts(req.Credentials, req.Scope)
+	if len(accounts) == 0 {
+		return provider.ListActiveInstancesResult{}, errors.New("aws iam credentials are required")
 	}
 
-	baseClient := s.clientFactory.NewEC2(ec2ClientOptions{
-		Config:   cfg,
-		Endpoint: req.Scope.Endpoint,
-	})
-	scanPlan, err := resolveListActiveInstancesScan(ctx, baseClient, req)
+	scanPlan, err := s.resolveListActiveInstancesScan(ctx, req, accounts)
 	if err != nil {
 		return provider.ListActiveInstancesResult{}, err
 	}
 
 	items := make([]provider.ActiveInstance, 0)
-	for _, region := range scanPlan.Regions {
-		regionCfg, err := s.clientFactory.NewConfig(ctx, *req.Credentials.AWS, effectiveEndpointRegion(req.Scope, region), req.Scope.Endpoint)
+	for _, target := range scanPlan.Targets {
+		regionCfg, err := s.clientFactory.NewConfig(ctx, target.Account.Credentials, effectiveEndpointRegion(req.Scope, target.Region), req.Scope.Endpoint)
 		if err != nil {
-			return provider.ListActiveInstancesResult{}, fmt.Errorf("build ec2 config for region %s: %w", region, err)
+			return provider.ListActiveInstancesResult{}, fmt.Errorf("build ec2 config for region %s: %w", target.Region, err)
 		}
 
 		regionItems, err := listActiveInstancesInRegion(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
 			Config:   regionCfg,
 			Endpoint: req.Scope.Endpoint,
-		}), region, req)
+		}), target.Account.AccountID, target.Region, req)
 		if err != nil {
 			return provider.ListActiveInstancesResult{}, err
 		}
@@ -61,6 +55,8 @@ func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActi
 		left := items[i]
 		right := items[j]
 		switch {
+		case left.AccountID != right.AccountID:
+			return left.AccountID < right.AccountID
 		case left.Region != right.Region:
 			return left.Region < right.Region
 		case left.AvailabilityZone != right.AvailabilityZone:
@@ -80,7 +76,7 @@ func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActi
 }
 
 func validateListActiveInstancesRequest(req provider.ListActiveInstancesRequest) error {
-	if req.Credentials.AWS == nil {
+	if req.Credentials.AWS == nil && len(req.Credentials.AWSAccounts) == 0 {
 		return errors.New("aws iam credentials are required")
 	}
 
@@ -160,54 +156,44 @@ func normalizeTagFilters(tags []provider.InstanceTag) []provider.InstanceTag {
 	return result
 }
 
-func effectiveListActiveInstancesBaseRegion(req provider.ListActiveInstancesRequest) string {
-	if len(req.Regions) > 0 && !containsAllSelector(req.Regions) {
-		return req.Regions[0]
-	}
-
-	return effectiveDiscoveryBaseRegion("")
-}
-
 type activeInstanceScanPlan struct {
-	Regions        []string
+	Targets        []activeInstanceScanTarget
 	CoveredRegions []string
 	NextCursor     string
 }
 
-func resolveListActiveInstancesScan(ctx context.Context, client ec2API, req provider.ListActiveInstancesRequest) (activeInstanceScanPlan, error) {
-	if len(req.Regions) > 0 && !containsAllSelector(req.Regions) {
-		regions := append([]string(nil), req.Regions...)
-		return activeInstanceScanPlan{
-			Regions:        regions,
-			CoveredRegions: regions,
-		}, nil
-	}
+type activeInstanceScanTarget struct {
+	Account routedAWSAccount
+	Region  string
+}
 
-	regions, err := listAccountRegions(ctx, client)
+func (s *Service) resolveListActiveInstancesScan(ctx context.Context, req provider.ListActiveInstancesRequest, accounts []routedAWSAccount) (activeInstanceScanPlan, error) {
+	targets, err := s.listActiveInstanceTargets(ctx, req, accounts)
 	if err != nil {
 		return activeInstanceScanPlan{}, err
 	}
-	if len(regions) == 0 {
+	if len(targets) == 0 {
 		return activeInstanceScanPlan{}, nil
 	}
+	multiAccount := hasMultipleActiveInstanceAccounts(targets)
 	if !listActiveInstancesUsesIncrementalInventory(req.Options) {
 		return activeInstanceScanPlan{
-			Regions:        append([]string(nil), regions...),
-			CoveredRegions: append([]string(nil), regions...),
+			Targets:        targets,
+			CoveredRegions: coveredRegionsForTargets(targets),
 		}, nil
 	}
 
 	cursor, _ := lookupOptionValue(req.Options, optionInventoryCursor)
-	index := nextActiveInstanceScanIndex(regions, cursor)
+	index := nextActiveInstanceScanTargetIndex(targets, cursor)
 	nextCursor := ""
-	if index+1 < len(regions) {
-		nextCursor = regions[index+1]
+	if index+1 < len(targets) {
+		nextCursor = encodeActiveInstanceCursor(targets[index+1], multiAccount)
 	}
 
-	region := regions[index]
+	target := targets[index]
 	return activeInstanceScanPlan{
-		Regions:        []string{region},
-		CoveredRegions: []string{region},
+		Targets:        []activeInstanceScanTarget{target},
+		CoveredRegions: []string{target.Region},
 		NextCursor:     nextCursor,
 	}, nil
 }
@@ -220,8 +206,8 @@ func listActiveInstancesUsesIncrementalInventory(options map[string]string) bool
 	return strings.EqualFold(strings.TrimSpace(value), "true")
 }
 
-func nextActiveInstanceScanIndex(regions []string, cursor string) int {
-	if len(regions) == 0 {
+func nextActiveInstanceScanTargetIndex(targets []activeInstanceScanTarget, cursor string) int {
+	if len(targets) == 0 {
 		return 0
 	}
 
@@ -230,8 +216,8 @@ func nextActiveInstanceScanIndex(regions []string, cursor string) int {
 		return 0
 	}
 
-	for index, region := range regions {
-		if strings.EqualFold(region, cursor) {
+	for index, target := range targets {
+		if strings.EqualFold(encodeActiveInstanceCursor(target, true), cursor) || strings.EqualFold(target.Region, cursor) {
 			return index
 		}
 	}
@@ -239,9 +225,93 @@ func nextActiveInstanceScanIndex(regions []string, cursor string) int {
 	return 0
 }
 
+func (s *Service) listActiveInstanceTargets(ctx context.Context, req provider.ListActiveInstancesRequest, accounts []routedAWSAccount) ([]activeInstanceScanTarget, error) {
+	targets := make([]activeInstanceScanTarget, 0)
+	if len(req.Regions) > 0 && !containsAllSelector(req.Regions) {
+		for _, account := range accounts {
+			for _, region := range req.Regions {
+				targets = append(targets, activeInstanceScanTarget{
+					Account: account,
+					Region:  region,
+				})
+			}
+		}
+		return sortActiveInstanceScanTargets(targets), nil
+	}
+
+	for _, account := range accounts {
+		baseRegion := effectiveDiscoveryBaseRegion("")
+		cfg, err := s.clientFactory.NewConfig(ctx, account.Credentials, effectiveEndpointRegion(req.Scope, baseRegion), req.Scope.Endpoint)
+		if err != nil {
+			return nil, err
+		}
+		regions, err := listAccountRegions(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
+			Config:   cfg,
+			Endpoint: req.Scope.Endpoint,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		for _, region := range regions {
+			targets = append(targets, activeInstanceScanTarget{
+				Account: account,
+				Region:  region,
+			})
+		}
+	}
+	return sortActiveInstanceScanTargets(targets), nil
+}
+
+func sortActiveInstanceScanTargets(targets []activeInstanceScanTarget) []activeInstanceScanTarget {
+	slices.SortFunc(targets, func(left, right activeInstanceScanTarget) int {
+		switch {
+		case left.Account.AccountID != right.Account.AccountID:
+			return strings.Compare(left.Account.AccountID, right.Account.AccountID)
+		default:
+			return strings.Compare(left.Region, right.Region)
+		}
+	})
+	return targets
+}
+
+func coveredRegionsForTargets(targets []activeInstanceScanTarget) []string {
+	seen := make(map[string]struct{}, len(targets))
+	regions := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if _, ok := seen[target.Region]; ok {
+			continue
+		}
+		seen[target.Region] = struct{}{}
+		regions = append(regions, target.Region)
+	}
+	sort.Strings(regions)
+	return regions
+}
+
+func encodeActiveInstanceCursor(target activeInstanceScanTarget, multiAccount bool) string {
+	if !multiAccount {
+		return strings.TrimSpace(target.Region)
+	}
+	return strings.TrimSpace(target.Account.AccountID) + "::" + strings.TrimSpace(target.Region)
+}
+
+func hasMultipleActiveInstanceAccounts(targets []activeInstanceScanTarget) bool {
+	if len(targets) <= 1 {
+		return false
+	}
+	first := strings.TrimSpace(targets[0].Account.AccountID)
+	for _, target := range targets[1:] {
+		if strings.TrimSpace(target.Account.AccountID) != first {
+			return true
+		}
+	}
+	return false
+}
+
 func listActiveInstancesInRegion(
 	ctx context.Context,
 	client ec2API,
+	accountID string,
 	region string,
 	req provider.ListActiveInstancesRequest,
 ) ([]provider.ActiveInstance, error) {
@@ -280,7 +350,7 @@ func listActiveInstancesInRegion(
 				if !matchesActiveInstanceFilters(instance, region, req) {
 					continue
 				}
-				items = append(items, buildActiveInstance(region, instance))
+				items = append(items, buildActiveInstance(accountID, region, instance))
 			}
 		}
 
@@ -396,7 +466,7 @@ func matchesTagFilters(tags []ec2types.Tag, requested []provider.InstanceTag) bo
 	return true
 }
 
-func buildActiveInstance(region string, instance ec2types.Instance) provider.ActiveInstance {
+func buildActiveInstance(accountID string, region string, instance ec2types.Instance) provider.ActiveInstance {
 	tags := toProviderInstanceTags(instance.Tags)
 	providerAttributes := map[string]string{}
 	if subnetID := strings.TrimSpace(awsv2.ToString(instance.SubnetId)); subnetID != "" {
@@ -422,6 +492,7 @@ func buildActiveInstance(region string, instance ec2types.Instance) provider.Act
 		LaunchTime:         awsv2.ToTime(instance.LaunchTime),
 		Tags:               tags,
 		ProviderAttributes: providerAttributes,
+		AccountID:          strings.TrimSpace(accountID),
 	}
 }
 

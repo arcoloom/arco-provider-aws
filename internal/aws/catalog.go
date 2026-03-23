@@ -78,6 +78,7 @@ type catalogRepository struct {
 type catalogSnapshot struct {
 	metadataByType map[string]catalogInstanceMetadataRecord
 	regionsByType  map[string][]provider.Region
+	regionNames    map[string]string
 	pricesByKey    map[string]catalogOnDemandPriceRecord
 	seriesToTypes  map[string][]string
 }
@@ -211,6 +212,7 @@ func buildCatalogSnapshot(
 	}
 
 	regionsByType := make(map[string][]provider.Region)
+	regionNames := make(map[string]string)
 	pricesByKey := make(map[string]catalogOnDemandPriceRecord)
 	regionSeen := make(map[string]map[string]struct{})
 	for _, item := range regions {
@@ -220,6 +222,11 @@ func buildCatalogSnapshot(
 			continue
 		}
 		regionName := strings.TrimSpace(item.RegionName)
+		if regionName != "" {
+			if _, ok := regionNames[regionCode]; !ok {
+				regionNames[regionCode] = regionName
+			}
+		}
 		if _, ok := regionSeen[instanceType]; !ok {
 			regionSeen[instanceType] = make(map[string]struct{})
 		}
@@ -285,6 +292,7 @@ func buildCatalogSnapshot(
 	return catalogSnapshot{
 		metadataByType: metadataByType,
 		regionsByType:  regionsByType,
+		regionNames:    regionNames,
 		pricesByKey:    pricesByKey,
 		seriesToTypes:  seriesToTypes,
 	}
@@ -420,6 +428,9 @@ func (s *Service) GetInstancePrices(ctx context.Context, req provider.GetInstanc
 	if region == "" {
 		return provider.GetInstancePricesResult{}, errors.New("region is required for price queries")
 	}
+	if req.Credentials.AWS == nil && len(req.Credentials.AWSAccounts) == 0 {
+		return provider.GetInstancePricesResult{}, errors.New("aws iam credentials are required")
+	}
 
 	purchaseOption := req.PurchaseOption
 	if purchaseOption == "" {
@@ -445,52 +456,22 @@ func (s *Service) GetInstancePrices(ctx context.Context, req provider.GetInstanc
 		return provider.GetInstancePricesResult{}, err
 	}
 
-	items := make([]provider.InstancePrice, 0)
-	requestedTypes := buildNormalizedSet(req.InstanceTypes)
-	if !supportsCatalogOnDemandPriceFilters(operatingSystem, tenancy, preinstalledSoftware, licenseModel) {
-		return provider.GetInstancePricesResult{
-			Items:    items,
-			Warnings: buildMissingPriceWarnings(req.InstanceTypes, items),
-		}, nil
+	items, err := s.getOnDemandPrices(
+		ctx,
+		req.Credentials,
+		req.Scope,
+		snapshot,
+		region,
+		req.InstanceTypes,
+		operatingSystem,
+		tenancy,
+		preinstalledSoftware,
+		licenseModel,
+		currency,
+	)
+	if err != nil {
+		return provider.GetInstancePricesResult{}, err
 	}
-
-	for _, instanceType := range sortedInstanceTypes(snapshot.metadataByType) {
-		if len(requestedTypes) > 0 {
-			if _, ok := requestedTypes[normalizeToken(instanceType)]; !ok {
-				continue
-			}
-		}
-		price, ok := snapshot.pricesByKey[priceKey(instanceType, region)]
-		if !ok {
-			continue
-		}
-		if !supportsRegion(snapshot.regionsByType[instanceType], region) {
-			continue
-		}
-		items = append(items, provider.InstancePrice{
-			InstanceType:         instanceType,
-			Region:               price.Region,
-			PurchaseOption:       provider.PurchaseOptionOnDemand,
-			OperatingSystem:      operatingSystem,
-			Tenancy:              tenancy,
-			PreinstalledSoftware: preinstalledSoftware,
-			LicenseModel:         licenseModel,
-			BillingUnit:          "Hrs",
-			Currency:             currency,
-			Price:                price.Price,
-			Description:          fmt.Sprintf("%s on-demand hourly price from instance_regions.json", instanceType),
-		})
-	}
-
-	slices.SortFunc(items, func(a, b provider.InstancePrice) int {
-		if cmp := strings.Compare(a.InstanceType, b.InstanceType); cmp != 0 {
-			return cmp
-		}
-		if cmp := strings.Compare(a.Price, b.Price); cmp != 0 {
-			return cmp
-		}
-		return strings.Compare(a.SKU, b.SKU)
-	})
 
 	return provider.GetInstancePricesResult{
 		Items:    items,

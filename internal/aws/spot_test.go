@@ -9,6 +9,7 @@ import (
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
@@ -233,8 +234,9 @@ func TestGetSpotDataExplicitRegionOptionFansOutSelectedRegions(t *testing.T) {
 }
 
 type fakeClientFactory struct {
-	clients   map[string]ec2API
-	stsClient stsAPI
+	clients       map[string]ec2API
+	pricingClient pricingAPI
+	stsClient     stsAPI
 }
 
 func (f fakeClientFactory) NewConfig(_ context.Context, _ provider.AWSCredentials, region string, _ string) (awsv2.Config, error) {
@@ -243,6 +245,13 @@ func (f fakeClientFactory) NewConfig(_ context.Context, _ provider.AWSCredential
 
 func (f fakeClientFactory) NewEC2(options ec2ClientOptions) ec2API {
 	return f.clients[options.Config.Region]
+}
+
+func (f fakeClientFactory) NewPricing(awsv2.Config) pricingAPI {
+	if f.pricingClient != nil {
+		return f.pricingClient
+	}
+	return &fakePricingClient{}
 }
 
 func (f fakeClientFactory) NewSSM(awsv2.Config) ssmAPI {
@@ -269,6 +278,27 @@ type fakeEC2Client struct {
 	spotPlacementScoresOutput   map[string]*ec2.GetSpotPlacementScoresOutput
 	subnetsOutput               *ec2.DescribeSubnetsOutput
 	vpcsOutput                  *ec2.DescribeVpcsOutput
+}
+
+type fakePricingClient struct {
+	outputs []*awspricing.GetProductsOutput
+	err     error
+	index   int
+}
+
+func (f *fakePricingClient) GetProducts(_ context.Context, _ *awspricing.GetProductsInput, _ ...func(*awspricing.Options)) (*awspricing.GetProductsOutput, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.outputs) == 0 {
+		return &awspricing.GetProductsOutput{}, nil
+	}
+	if f.index >= len(f.outputs) {
+		return f.outputs[len(f.outputs)-1], nil
+	}
+	output := f.outputs[f.index]
+	f.index++
+	return output, nil
 }
 
 func (f fakeEC2Client) AssociateRouteTable(context.Context, *ec2.AssociateRouteTableInput, ...func(*ec2.Options)) (*ec2.AssociateRouteTableOutput, error) {

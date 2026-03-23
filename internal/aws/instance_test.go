@@ -158,6 +158,109 @@ func TestStopInstanceDoesNotRequireScopeRegion(t *testing.T) {
 	}
 }
 
+func TestStartInstanceRoutesSelectedAccountCredentials(t *testing.T) {
+	runner := &fakeInstanceLifecycleRunner{
+		startResult: provider.StartInstanceResult{
+			StackName:  "stack-a",
+			InstanceID: "i-123",
+		},
+	}
+	service := &Service{
+		version:        "test",
+		clientFactory:  newAWSClientFactory(),
+		instanceRunner: runner,
+	}
+
+	req := provider.StartInstanceRequest{
+		Credentials: provider.Credentials{
+			AWSAccounts: []provider.AWSAccount{
+				{
+					Name: "acct-a",
+					Credentials: provider.AWSCredentials{
+						AccessKeyID:     "ak-a",
+						SecretAccessKey: "sk-a",
+					},
+				},
+				{
+					Name: "acct-b",
+					Credentials: provider.AWSCredentials{
+						AccessKeyID:     "ak-b",
+						SecretAccessKey: "sk-b",
+					},
+				},
+			},
+		},
+		AccountID:    resolveInternalAccountID("acct-b", provider.AWSCredentials{AccessKeyID: "ak-b", SecretAccessKey: "sk-b"}, provider.ConnectionScope{}),
+		Region:       "us-west-2",
+		StackName:    "stack-a",
+		InstanceType: "m7i.large",
+	}
+
+	if _, err := service.StartInstance(context.Background(), req); err != nil {
+		t.Fatalf("StartInstance returned error: %v", err)
+	}
+	if runner.startReq.Credentials.AWS == nil {
+		t.Fatal("expected routed AWS credentials")
+	}
+	if runner.startReq.Credentials.AWS.AccessKeyID != "ak-b" {
+		t.Fatalf("routed access key = %q, want %q", runner.startReq.Credentials.AWS.AccessKeyID, "ak-b")
+	}
+	if runner.startReq.AccountID != req.AccountID {
+		t.Fatalf("routed account id = %q, want %q", runner.startReq.AccountID, req.AccountID)
+	}
+}
+
+func TestStopInstanceRoutesSelectedAccountCredentials(t *testing.T) {
+	runner := &fakeInstanceLifecycleRunner{
+		stopResult: provider.StopInstanceResult{
+			InstanceID: "i-stack-a",
+			Destroyed:  true,
+		},
+	}
+	service := &Service{
+		version:        "test",
+		clientFactory:  newAWSClientFactory(),
+		instanceRunner: runner,
+	}
+
+	req := provider.StopInstanceRequest{
+		Credentials: provider.Credentials{
+			AWSAccounts: []provider.AWSAccount{
+				{
+					Name: "acct-a",
+					Credentials: provider.AWSCredentials{
+						AccessKeyID:     "ak-a",
+						SecretAccessKey: "sk-a",
+					},
+				},
+				{
+					Name: "acct-b",
+					Credentials: provider.AWSCredentials{
+						AccessKeyID:     "ak-b",
+						SecretAccessKey: "sk-b",
+					},
+				},
+			},
+		},
+		AccountID:  resolveInternalAccountID("acct-a", provider.AWSCredentials{AccessKeyID: "ak-a", SecretAccessKey: "sk-a"}, provider.ConnectionScope{}),
+		InstanceID: "i-stack-a",
+		Region:     "us-west-2",
+	}
+
+	if _, err := service.StopInstance(context.Background(), req); err != nil {
+		t.Fatalf("StopInstance returned error: %v", err)
+	}
+	if runner.stopReq.Credentials.AWS == nil {
+		t.Fatal("expected routed AWS credentials")
+	}
+	if runner.stopReq.Credentials.AWS.AccessKeyID != "ak-a" {
+		t.Fatalf("routed access key = %q, want %q", runner.stopReq.Credentials.AWS.AccessKeyID, "ak-a")
+	}
+	if runner.stopReq.AccountID != req.AccountID {
+		t.Fatalf("routed account id = %q, want %q", runner.stopReq.AccountID, req.AccountID)
+	}
+}
+
 func TestEC2RunnerDryRunStartAndStop(t *testing.T) {
 	runner := newInstanceLifecycleRunner(nil)
 
@@ -939,8 +1042,9 @@ func (f *fakeInstanceLifecycleRunner) Stop(_ context.Context, req provider.StopI
 }
 
 type instanceTestClientFactory struct {
-	ec2Client ec2API
-	ssmClient ssmAPI
+	ec2Client     ec2API
+	pricingClient pricingAPI
+	ssmClient     ssmAPI
 }
 
 func (f instanceTestClientFactory) NewConfig(_ context.Context, _ provider.AWSCredentials, region string, _ string) (awsv2.Config, error) {
@@ -949,6 +1053,13 @@ func (f instanceTestClientFactory) NewConfig(_ context.Context, _ provider.AWSCr
 
 func (f instanceTestClientFactory) NewEC2(ec2ClientOptions) ec2API {
 	return f.ec2Client
+}
+
+func (f instanceTestClientFactory) NewPricing(awsv2.Config) pricingAPI {
+	if f.pricingClient != nil {
+		return f.pricingClient
+	}
+	return &fakePricingClient{}
 }
 
 func (f instanceTestClientFactory) NewSSM(awsv2.Config) ssmAPI {

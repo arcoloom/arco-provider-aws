@@ -19,6 +19,12 @@ func (s *Service) StartInstance(ctx context.Context, req provider.StartInstanceR
 	if err := validateStartInstanceRequest(req); err != nil {
 		return provider.StartInstanceResult{}, err
 	}
+	account, err := routeAWSAccount(req.Credentials, req.AccountID, req.Scope)
+	if err != nil {
+		return provider.StartInstanceResult{}, err
+	}
+	req.Credentials = provider.Credentials{AWS: &account.Credentials}
+	req.AccountID = account.AccountID
 
 	return s.instanceRunner.Start(ctx, req)
 }
@@ -28,12 +34,18 @@ func (s *Service) StopInstance(ctx context.Context, req provider.StopInstanceReq
 	if err := validateStopInstanceRequest(req); err != nil {
 		return provider.StopInstanceResult{}, err
 	}
+	account, err := routeAWSAccount(req.Credentials, req.AccountID, req.Scope)
+	if err != nil {
+		return provider.StopInstanceResult{}, err
+	}
+	req.Credentials = provider.Credentials{AWS: &account.Credentials}
+	req.AccountID = account.AccountID
 
 	return s.instanceRunner.Stop(ctx, req)
 }
 
 func validateStartInstanceRequest(req provider.StartInstanceRequest) error {
-	if req.Credentials.AWS == nil {
+	if !hasAnyAWSCredentials(req.Credentials) {
 		return errors.New("aws iam credentials are required")
 	}
 	if strings.TrimSpace(req.StackName) == "" {
@@ -56,7 +68,7 @@ func validateStartInstanceRequest(req provider.StartInstanceRequest) error {
 }
 
 func validateStopInstanceRequest(req provider.StopInstanceRequest) error {
-	if req.Credentials.AWS == nil {
+	if !hasAnyAWSCredentials(req.Credentials) {
 		return errors.New("aws iam credentials are required")
 	}
 	if strings.TrimSpace(req.InstanceID) == "" {
@@ -91,4 +103,8 @@ func normalizeStopInstanceRequest(req provider.StopInstanceRequest) provider.Sto
 	req.InstanceID = strings.TrimSpace(req.InstanceID)
 	req.Region = strings.TrimSpace(req.Region)
 	return req
+}
+
+func hasAnyAWSCredentials(credentials provider.Credentials) bool {
+	return credentials.AWS != nil || len(credentials.AWSAccounts) != 0
 }

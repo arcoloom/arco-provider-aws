@@ -117,6 +117,32 @@ func (c *Client) ListAvailabilityZones(ctx context.Context, req provider.ListAva
 	return toDomainListAvailabilityZonesResult(resp), nil
 }
 
+func (c *Client) WatchMarketFeed(ctx context.Context, req provider.WatchMarketFeedRequest, handler func(provider.WatchMarketFeedEvent) error) error {
+	stream, err := c.client.WatchMarketFeed(c.withAuth(ctx), &providerv1.WatchMarketFeedRequest{
+		Context:     toProtoContext(req.Context),
+		Credentials: toProtoCredentials(req.Credentials),
+		Scope:       toProtoScope(req.Scope),
+		ResumeToken: req.ResumeToken,
+		Options:     req.Options,
+	})
+	if err != nil {
+		return err
+	}
+
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if handler == nil {
+			continue
+		}
+		if err := handler(toDomainWatchMarketFeedEvent(resp)); err != nil {
+			return err
+		}
+	}
+}
+
 func (c *Client) GetSpotData(ctx context.Context, req provider.GetSpotDataRequest) (provider.GetSpotDataResult, error) {
 	resp, err := c.client.GetSpotData(c.withAuth(ctx), &providerv1.GetSpotDataRequest{
 		Context:           toProtoContext(req.Context),
@@ -149,6 +175,7 @@ func (c *Client) StartInstance(ctx context.Context, req provider.StartInstanceRe
 		Options:          req.Options,
 		Tags:             toProtoInstanceTags(req.Tags),
 		ProviderConfig:   toProtoProviderConfig(req.ProviderConfig),
+		AccountId:        req.AccountID,
 	})
 	if err != nil {
 		return provider.StartInstanceResult{}, err
@@ -165,6 +192,7 @@ func (c *Client) StopInstance(ctx context.Context, req provider.StopInstanceRequ
 		InstanceId:  req.InstanceID,
 		Region:      req.Region,
 		Options:     req.Options,
+		AccountId:   req.AccountID,
 	})
 	if err != nil {
 		return provider.StopInstanceResult{}, err
@@ -228,6 +256,7 @@ func (c *Client) GetInstanceTypeInfo(ctx context.Context, req provider.GetInstan
 func (c *Client) GetInstancePrices(ctx context.Context, req provider.GetInstancePricesRequest) (provider.GetInstancePricesResult, error) {
 	resp, err := c.client.GetInstancePrices(c.withAuth(ctx), &providerv1.GetInstancePricesRequest{
 		Context:              toProtoContext(req.Context),
+		Credentials:          toProtoCredentials(req.Credentials),
 		Scope:                toProtoScope(req.Scope),
 		Region:               req.Region,
 		InstanceTypes:        req.InstanceTypes,
