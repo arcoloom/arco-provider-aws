@@ -75,6 +75,12 @@ func (r ec2InstanceLifecycleRunner) Start(ctx context.Context, req provider.Star
 	input := buildRunInstancesInput(req, amiID, runConfig, providerConfig)
 	output, err := ec2Client.RunInstances(ctx, input)
 	if err != nil {
+		if launchFailure := classifyStartInstanceError(req, err); launchFailure != nil {
+			return provider.StartInstanceResult{
+				StackName:     req.StackName,
+				LaunchFailure: launchFailure,
+			}, nil
+		}
 		return provider.StartInstanceResult{}, fmt.Errorf("run instances for stack %s in region %s: %w", req.StackName, cfg.Region, err)
 	}
 	if len(output.Instances) == 0 {

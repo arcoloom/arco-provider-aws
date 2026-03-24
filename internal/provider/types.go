@@ -115,6 +115,39 @@ type Warning struct {
 	Message string
 }
 
+type LaunchFailureClass string
+
+const (
+	LaunchFailureClassCapacity LaunchFailureClass = "capacity"
+	LaunchFailureClassQuota    LaunchFailureClass = "quota"
+	LaunchFailureClassPrice    LaunchFailureClass = "price"
+	LaunchFailureClassAPI      LaunchFailureClass = "api"
+	LaunchFailureClassAuth     LaunchFailureClass = "auth"
+	LaunchFailureClassConfig   LaunchFailureClass = "config"
+	LaunchFailureClassProvider LaunchFailureClass = "provider"
+)
+
+type LaunchFailureScope string
+
+const (
+	LaunchFailureScopePlacement LaunchFailureScope = "placement"
+	LaunchFailureScopeZone      LaunchFailureScope = "zone"
+	LaunchFailureScopeRegion    LaunchFailureScope = "region"
+	LaunchFailureScopeAccount   LaunchFailureScope = "account"
+	LaunchFailureScopeProvider  LaunchFailureScope = "provider"
+	LaunchFailureScopeJob       LaunchFailureScope = "job"
+)
+
+type LaunchFailure struct {
+	Code       string
+	Class      LaunchFailureClass
+	Scope      LaunchFailureScope
+	Retryable  bool
+	Message    string
+	RawCode    string
+	Attributes map[string]string
+}
+
 type ValidateConnectionResult struct {
 	Accepted bool
 	Message  string
@@ -268,12 +301,13 @@ type StartInstanceRequest struct {
 }
 
 type StartInstanceResult struct {
-	StackName  string
-	InstanceID string
-	URN        string
-	PublicIP   string
-	PrivateIP  string
-	Warnings   []Warning
+	StackName     string
+	InstanceID    string
+	URN           string
+	PublicIP      string
+	PrivateIP     string
+	Warnings      []Warning
+	LaunchFailure *LaunchFailure
 }
 
 type StopInstanceRequest struct {

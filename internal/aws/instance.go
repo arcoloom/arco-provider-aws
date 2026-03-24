@@ -17,11 +17,17 @@ type instanceLifecycleRunner interface {
 func (s *Service) StartInstance(ctx context.Context, req provider.StartInstanceRequest) (provider.StartInstanceResult, error) {
 	req = normalizeStartInstanceRequest(req)
 	if err := validateStartInstanceRequest(req); err != nil {
-		return provider.StartInstanceResult{}, err
+		return provider.StartInstanceResult{
+			StackName:     req.StackName,
+			LaunchFailure: launchFailureFromRequestError(req, err),
+		}, nil
 	}
 	account, err := routeAWSAccount(req.Credentials, req.AccountID, req.Scope)
 	if err != nil {
-		return provider.StartInstanceResult{}, err
+		return provider.StartInstanceResult{
+			StackName:     req.StackName,
+			LaunchFailure: launchFailureFromRequestError(req, err),
+		}, nil
 	}
 	req.Credentials = provider.Credentials{AWS: &account.Credentials}
 	req.AccountID = account.AccountID

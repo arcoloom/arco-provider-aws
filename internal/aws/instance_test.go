@@ -71,16 +71,25 @@ func TestStartInstanceDelegatesToRunner(t *testing.T) {
 func TestStartInstanceRequiresCoreFields(t *testing.T) {
 	service := &Service{instanceRunner: &fakeInstanceLifecycleRunner{}}
 
-	_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{})
-	if err == nil {
-		t.Fatal("expected validation error")
+	result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{})
+	if err != nil {
+		t.Fatalf("expected structured launch failure, got error: %v", err)
+	}
+	if result.LaunchFailure == nil {
+		t.Fatal("expected launch failure")
+	}
+	if result.LaunchFailure.Class != provider.LaunchFailureClassAuth {
+		t.Fatalf("launch failure class = %q, want %q", result.LaunchFailure.Class, provider.LaunchFailureClassAuth)
+	}
+	if result.LaunchFailure.Scope != provider.LaunchFailureScopeAccount {
+		t.Fatalf("launch failure scope = %q, want %q", result.LaunchFailure.Scope, provider.LaunchFailureScopeAccount)
 	}
 }
 
 func TestStartInstanceRequiresExplicitRegion(t *testing.T) {
 	service := &Service{instanceRunner: &fakeInstanceLifecycleRunner{}}
 
-	_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+	result, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
 		Credentials: provider.Credentials{
 			AWS: &provider.AWSCredentials{
 				AccessKeyID:     "ak",
@@ -93,8 +102,14 @@ func TestStartInstanceRequiresExplicitRegion(t *testing.T) {
 			Region: "us-west-2",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "region is required") {
-		t.Fatalf("expected explicit region validation error, got %v", err)
+	if err != nil {
+		t.Fatalf("expected structured launch failure, got %v", err)
+	}
+	if result.LaunchFailure == nil || result.LaunchFailure.Class != provider.LaunchFailureClassConfig {
+		t.Fatalf("expected config launch failure, got %+v", result.LaunchFailure)
+	}
+	if !strings.Contains(result.LaunchFailure.Message, "region is required") {
+		t.Fatalf("expected region validation message, got %+v", result.LaunchFailure)
 	}
 }
 

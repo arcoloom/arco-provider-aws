@@ -190,6 +190,13 @@ func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provid
 			if err != nil {
 				continue
 			}
+			attributes := buildMarketOfferingAttributes(record, "pricing_api", price.Price, price.EffectiveAt, provider.SpotInventory{})
+			if priceValue <= 0 {
+				attributes["health_state"] = "blocked"
+				attributes["price_confidence"] = "invalid"
+				attributes["effective_hourly_price_usd"] = "0"
+				warnings = append(warnings, invalidPriceWarning("on-demand", region, price.InstanceType, priceValue))
+			}
 			items = append(items, provider.MarketOffering{
 				AccountID:        account.AccountID,
 				Region:           price.Region.Code,
@@ -201,7 +208,7 @@ func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provid
 				MemoryMiB:        int32(record.Memory * 1024),
 				GPUCount:         int32(record.GPU),
 				HourlyPriceUSD:   priceValue,
-				Attributes:       buildMarketOfferingAttributes(record, "pricing_api", price.Price, price.EffectiveAt, provider.SpotInventory{}),
+				Attributes:       attributes,
 			})
 		}
 	}
@@ -265,6 +272,7 @@ func (s *Service) buildSpotMarketOfferings(ctx context.Context, scope provider.C
 				if err != nil || !spotItem.HasPrice {
 					continue
 				}
+				attributes := buildMarketOfferingAttributes(record, "spot", spotItem.Price, spotItem.Timestamp, spotItem.Inventory)
 				items = append(items, provider.MarketOffering{
 					AccountID:        account.AccountID,
 					Region:           spotItem.Region,
@@ -276,7 +284,7 @@ func (s *Service) buildSpotMarketOfferings(ctx context.Context, scope provider.C
 					MemoryMiB:        int32(record.Memory * 1024),
 					GPUCount:         int32(record.GPU),
 					HourlyPriceUSD:   priceValue,
-					Attributes:       buildMarketOfferingAttributes(record, "spot", spotItem.Price, spotItem.Timestamp, spotItem.Inventory),
+					Attributes:       attributes,
 				})
 			}
 			if index == len(batches)-1 {
@@ -346,6 +354,8 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 	if len(attributes) == 0 {
 		attributes = make(map[string]string)
 	}
+	attributes["health_state"] = "healthy"
+	attributes["price_confidence"] = "observed"
 	if architectures := normalizeMarketArchitectures(record.Arch); len(architectures) > 0 {
 		attributes["architectures"] = strings.Join(architectures, ",")
 		if len(architectures) == 1 {
@@ -362,6 +372,9 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 	}
 	if !effectiveAt.IsZero() {
 		attributes["price_effective_at"] = effectiveAt.UTC().Format(time.RFC3339)
+	}
+	if normalizedPrice := strings.TrimSpace(price); normalizedPrice != "" {
+		attributes["effective_hourly_price_usd"] = normalizedPrice
 	}
 	if inventory.Status != "" {
 		attributes["inventory_status"] = inventory.Status

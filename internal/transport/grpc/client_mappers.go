@@ -404,12 +404,13 @@ func toDomainStartInstanceResult(resp *providerv1.StartInstanceResponse) provide
 	}
 
 	return provider.StartInstanceResult{
-		StackName:  resp.GetStackName(),
-		InstanceID: resp.GetInstanceId(),
-		URN:        resp.GetUrn(),
-		PublicIP:   resp.GetPublicIp(),
-		PrivateIP:  resp.GetPrivateIp(),
-		Warnings:   warnings,
+		StackName:     resp.GetStackName(),
+		InstanceID:    resp.GetInstanceId(),
+		URN:           resp.GetUrn(),
+		PublicIP:      resp.GetPublicIp(),
+		PrivateIP:     resp.GetPrivateIp(),
+		Warnings:      warnings,
+		LaunchFailure: toDomainLaunchFailure(resp.GetLaunchFailure()),
 	}
 }
 
@@ -676,4 +677,59 @@ func toDomainWarnings(items []*providerv1.Warning) []provider.Warning {
 		})
 	}
 	return warnings
+}
+
+func toDomainLaunchFailureClass(value providerv1.LaunchFailureClass) provider.LaunchFailureClass {
+	switch value {
+	case providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_CAPACITY:
+		return provider.LaunchFailureClassCapacity
+	case providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_QUOTA:
+		return provider.LaunchFailureClassQuota
+	case providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_PRICE:
+		return provider.LaunchFailureClassPrice
+	case providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_API:
+		return provider.LaunchFailureClassAPI
+	case providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_AUTH:
+		return provider.LaunchFailureClassAuth
+	case providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_CONFIG:
+		return provider.LaunchFailureClassConfig
+	case providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_PROVIDER:
+		return provider.LaunchFailureClassProvider
+	default:
+		return ""
+	}
+}
+
+func toDomainLaunchFailureScope(value providerv1.LaunchFailureScope) provider.LaunchFailureScope {
+	switch value {
+	case providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_PLACEMENT:
+		return provider.LaunchFailureScopePlacement
+	case providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_ZONE:
+		return provider.LaunchFailureScopeZone
+	case providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_REGION:
+		return provider.LaunchFailureScopeRegion
+	case providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_ACCOUNT:
+		return provider.LaunchFailureScopeAccount
+	case providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_PROVIDER:
+		return provider.LaunchFailureScopeProvider
+	case providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_JOB:
+		return provider.LaunchFailureScopeJob
+	default:
+		return ""
+	}
+}
+
+func toDomainLaunchFailure(item *providerv1.LaunchFailure) *provider.LaunchFailure {
+	if item == nil {
+		return nil
+	}
+	return &provider.LaunchFailure{
+		Code:       item.GetCode(),
+		Class:      toDomainLaunchFailureClass(item.GetClass()),
+		Scope:      toDomainLaunchFailureScope(item.GetScope()),
+		Retryable:  item.GetRetryable(),
+		Message:    item.GetMessage(),
+		RawCode:    item.GetRawCode(),
+		Attributes: item.GetAttributes(),
+	}
 }

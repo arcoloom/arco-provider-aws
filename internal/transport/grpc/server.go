@@ -236,12 +236,13 @@ func (s *Server) StartInstance(ctx context.Context, req *providerv1.StartInstanc
 	)
 
 	return &providerv1.StartInstanceResponse{
-		StackName:  result.StackName,
-		InstanceId: result.InstanceID,
-		Urn:        result.URN,
-		PublicIp:   result.PublicIP,
-		PrivateIp:  result.PrivateIP,
-		Warnings:   toProtoWarnings(result.Warnings),
+		StackName:     result.StackName,
+		InstanceId:    result.InstanceID,
+		Urn:           result.URN,
+		PublicIp:      result.PublicIP,
+		PrivateIp:     result.PrivateIP,
+		Warnings:      toProtoWarnings(result.Warnings),
+		LaunchFailure: toProtoLaunchFailure(result.LaunchFailure),
 	}, nil
 }
 

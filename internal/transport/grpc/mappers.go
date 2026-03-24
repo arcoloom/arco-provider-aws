@@ -135,6 +135,61 @@ func toProtoWarnings(warnings []provider.Warning) []*providerv1.Warning {
 	return result
 }
 
+func toProtoLaunchFailureClass(value provider.LaunchFailureClass) providerv1.LaunchFailureClass {
+	switch value {
+	case provider.LaunchFailureClassCapacity:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_CAPACITY
+	case provider.LaunchFailureClassQuota:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_QUOTA
+	case provider.LaunchFailureClassPrice:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_PRICE
+	case provider.LaunchFailureClassAPI:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_API
+	case provider.LaunchFailureClassAuth:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_AUTH
+	case provider.LaunchFailureClassConfig:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_CONFIG
+	case provider.LaunchFailureClassProvider:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_PROVIDER
+	default:
+		return providerv1.LaunchFailureClass_LAUNCH_FAILURE_CLASS_UNSPECIFIED
+	}
+}
+
+func toProtoLaunchFailureScope(value provider.LaunchFailureScope) providerv1.LaunchFailureScope {
+	switch value {
+	case provider.LaunchFailureScopePlacement:
+		return providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_PLACEMENT
+	case provider.LaunchFailureScopeZone:
+		return providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_ZONE
+	case provider.LaunchFailureScopeRegion:
+		return providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_REGION
+	case provider.LaunchFailureScopeAccount:
+		return providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_ACCOUNT
+	case provider.LaunchFailureScopeProvider:
+		return providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_PROVIDER
+	case provider.LaunchFailureScopeJob:
+		return providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_JOB
+	default:
+		return providerv1.LaunchFailureScope_LAUNCH_FAILURE_SCOPE_UNSPECIFIED
+	}
+}
+
+func toProtoLaunchFailure(item *provider.LaunchFailure) *providerv1.LaunchFailure {
+	if item == nil {
+		return nil
+	}
+	return &providerv1.LaunchFailure{
+		Code:       item.Code,
+		Class:      toProtoLaunchFailureClass(item.Class),
+		Scope:      toProtoLaunchFailureScope(item.Scope),
+		Retryable:  item.Retryable,
+		Message:    item.Message,
+		RawCode:    item.RawCode,
+		Attributes: item.Attributes,
+	}
+}
+
 func toProtoMarketOfferings(items []provider.MarketOffering) []*providerv1.MarketOffering {
 	result := make([]*providerv1.MarketOffering, 0, len(items))
 	for _, item := range items {

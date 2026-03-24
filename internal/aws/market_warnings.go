@@ -13,6 +13,7 @@ import (
 const (
 	warningCodeMarketRegionSkipped = "MARKET_REGION_SKIPPED"
 	warningCodeMarketBatchSkipped  = "MARKET_BATCH_SKIPPED"
+	warningCodePriceInvalid        = "PRICE_INVALID"
 )
 
 func shouldSkipMarketRegionError(err error) bool {
@@ -90,4 +91,17 @@ func summarizeInstanceTypes(instanceTypes []string) string {
 		return strings.Join(trimmed, ", ")
 	}
 	return fmt.Sprintf("%s, %s, %s (+%d more)", trimmed[0], trimmed[1], trimmed[2], len(trimmed)-3)
+}
+
+func invalidPriceWarning(purchaseOption string, region string, instanceType string, price float64) provider.Warning {
+	return provider.Warning{
+		Code: warningCodePriceInvalid,
+		Message: fmt.Sprintf(
+			"observed non-positive %s price for %s in region %s: %.6f",
+			strings.TrimSpace(purchaseOption),
+			strings.TrimSpace(instanceType),
+			strings.TrimSpace(region),
+			price,
+		),
+	}
 }
