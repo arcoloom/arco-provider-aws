@@ -87,7 +87,7 @@ func TestProviderProcessLifecycleAndBusinessCalls(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "123456789012",
+			ScopeID:   "123456789012",
 			Region:    "us-east-1",
 			Endpoint:  fakeAWS.URL,
 		},

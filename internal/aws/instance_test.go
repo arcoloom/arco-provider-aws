@@ -208,7 +208,7 @@ func TestStartInstanceRoutesSelectedAccountCredentials(t *testing.T) {
 				},
 			},
 		},
-		AccountID:    resolveInternalAccountID("acct-b", provider.AWSCredentials{AccessKeyID: "ak-b", SecretAccessKey: "sk-b"}, provider.ConnectionScope{}),
+		ScopeID:      resolveInternalScopeID("acct-b", provider.AWSCredentials{AccessKeyID: "ak-b", SecretAccessKey: "sk-b"}, provider.ConnectionScope{}),
 		Region:       "us-west-2",
 		StackName:    "stack-a",
 		InstanceType: "m7i.large",
@@ -223,8 +223,8 @@ func TestStartInstanceRoutesSelectedAccountCredentials(t *testing.T) {
 	if runner.startReq.Credentials.AWS.AccessKeyID != "ak-b" {
 		t.Fatalf("routed access key = %q, want %q", runner.startReq.Credentials.AWS.AccessKeyID, "ak-b")
 	}
-	if runner.startReq.AccountID != req.AccountID {
-		t.Fatalf("routed account id = %q, want %q", runner.startReq.AccountID, req.AccountID)
+	if runner.startReq.ScopeID != req.ScopeID {
+		t.Fatalf("routed scope id = %q, want %q", runner.startReq.ScopeID, req.ScopeID)
 	}
 }
 
@@ -260,7 +260,7 @@ func TestStopInstanceRoutesSelectedAccountCredentials(t *testing.T) {
 				},
 			},
 		},
-		AccountID:  resolveInternalAccountID("acct-a", provider.AWSCredentials{AccessKeyID: "ak-a", SecretAccessKey: "sk-a"}, provider.ConnectionScope{}),
+		ScopeID:    resolveInternalScopeID("acct-a", provider.AWSCredentials{AccessKeyID: "ak-a", SecretAccessKey: "sk-a"}, provider.ConnectionScope{}),
 		InstanceID: "i-stack-a",
 		Region:     "us-west-2",
 	}
@@ -274,8 +274,8 @@ func TestStopInstanceRoutesSelectedAccountCredentials(t *testing.T) {
 	if runner.stopReq.Credentials.AWS.AccessKeyID != "ak-a" {
 		t.Fatalf("routed access key = %q, want %q", runner.stopReq.Credentials.AWS.AccessKeyID, "ak-a")
 	}
-	if runner.stopReq.AccountID != req.AccountID {
-		t.Fatalf("routed account id = %q, want %q", runner.stopReq.AccountID, req.AccountID)
+	if runner.stopReq.ScopeID != req.ScopeID {
+		t.Fatalf("routed scope id = %q, want %q", runner.stopReq.ScopeID, req.ScopeID)
 	}
 }
 

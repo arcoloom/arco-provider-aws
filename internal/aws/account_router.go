@@ -11,7 +11,7 @@ import (
 )
 
 type routedAWSAccount struct {
-	AccountID   string
+	ScopeID     string
 	Name        string
 	Credentials provider.AWSCredentials
 }
@@ -21,13 +21,13 @@ func routeAWSAccounts(credentials provider.Credentials, scope provider.Connectio
 		items := make([]routedAWSAccount, 0, len(credentials.AWSAccounts))
 		for _, account := range credentials.AWSAccounts {
 			items = append(items, routedAWSAccount{
-				AccountID:   resolveInternalAccountID(account.Name, account.Credentials, scope),
+				ScopeID:     resolveInternalScopeID(account.Name, account.Credentials, scope),
 				Name:        strings.TrimSpace(account.Name),
 				Credentials: account.Credentials,
 			})
 		}
 		slices.SortFunc(items, func(left, right routedAWSAccount) int {
-			return strings.Compare(left.AccountID, right.AccountID)
+			return strings.Compare(left.ScopeID, right.ScopeID)
 		})
 		return items
 	}
@@ -35,34 +35,34 @@ func routeAWSAccounts(credentials provider.Credentials, scope provider.Connectio
 		return nil
 	}
 	return []routedAWSAccount{{
-		AccountID:   resolveInternalAccountID("", *credentials.AWS, scope),
+		ScopeID:     resolveInternalScopeID("", *credentials.AWS, scope),
 		Credentials: *credentials.AWS,
 	}}
 }
 
-func routeAWSAccount(credentials provider.Credentials, requestedAccountID string, scope provider.ConnectionScope) (routedAWSAccount, error) {
+func routeAWSAccount(credentials provider.Credentials, requestedScopeID string, scope provider.ConnectionScope) (routedAWSAccount, error) {
 	accounts := routeAWSAccounts(credentials, scope)
 	if len(accounts) == 0 {
 		return routedAWSAccount{}, fmt.Errorf("aws iam credentials are required")
 	}
 
-	requestedAccountID = strings.TrimSpace(requestedAccountID)
-	if requestedAccountID == "" {
+	requestedScopeID = strings.TrimSpace(requestedScopeID)
+	if requestedScopeID == "" {
 		if len(accounts) == 1 {
 			return accounts[0], nil
 		}
-		return routedAWSAccount{}, fmt.Errorf("account_id is required when multiple provider accounts are configured")
+		return routedAWSAccount{}, fmt.Errorf("scope_id is required when multiple provider accounts are configured")
 	}
 
 	for _, account := range accounts {
-		if account.AccountID == requestedAccountID {
+		if account.ScopeID == requestedScopeID {
 			return account, nil
 		}
 	}
-	return routedAWSAccount{}, fmt.Errorf("unknown account_id %q for this provider runtime", requestedAccountID)
+	return routedAWSAccount{}, fmt.Errorf("unknown scope_id %q for this provider runtime", requestedScopeID)
 }
 
-func resolveInternalAccountID(name string, credentials provider.AWSCredentials, scope provider.ConnectionScope) string {
+func resolveInternalScopeID(name string, credentials provider.AWSCredentials, scope provider.ConnectionScope) string {
 	parts := []string{
 		strings.TrimSpace(name),
 		strconvBool(credentials.UseDefaultCredentialsChain),

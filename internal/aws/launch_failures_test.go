@@ -10,7 +10,7 @@ import (
 
 func TestClassifyStartInstanceErrorMapsCapacityScopeFromZone(t *testing.T) {
 	failure := classifyStartInstanceError(provider.StartInstanceRequest{
-		AccountID:        "acct-1",
+		ScopeID:          "acct-1",
 		Region:           "ap-northeast-2",
 		AvailabilityZone: "ap-northeast-2a",
 		InstanceType:     "g6.2xlarge",
@@ -35,7 +35,7 @@ func TestClassifyStartInstanceErrorMapsCapacityScopeFromZone(t *testing.T) {
 
 func TestClassifyStartInstanceErrorMapsSpotQuotaToAccount(t *testing.T) {
 	failure := classifyStartInstanceError(provider.StartInstanceRequest{
-		AccountID:    "acct-1",
+		ScopeID:      "acct-1",
 		Region:       "ap-northeast-2",
 		InstanceType: "g6.2xlarge",
 		MarketType:   provider.InstanceMarketTypeSpot,

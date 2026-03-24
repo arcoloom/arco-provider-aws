@@ -19,7 +19,7 @@ func toProtoContext(ctx provider.RequestContext) *providerv1.RequestContext {
 
 func toProtoScope(scope provider.ConnectionScope) *providerv1.ConnectionScope {
 	return &providerv1.ConnectionScope{
-		AccountId:      scope.AccountID,
+		ScopeId:        scope.ScopeID,
 		Region:         scope.Region,
 		Endpoint:       scope.Endpoint,
 		Attributes:     scope.Attributes,
@@ -346,7 +346,7 @@ func toDomainMarketOfferings(items []*providerv1.MarketOffering) []provider.Mark
 			continue
 		}
 		result = append(result, provider.MarketOffering{
-			AccountID:        item.GetAccountId(),
+			ScopeID:          item.GetScopeId(),
 			Region:           item.GetRegion(),
 			AvailabilityZone: item.GetAvailabilityZone(),
 			ZoneID:           item.GetZoneId(),
@@ -458,7 +458,7 @@ func toDomainListActiveInstancesResult(resp *providerv1.ListActiveInstancesRespo
 			IPv6Addresses:      item.GetIpv6Addresses(),
 			Tags:               toDomainInstanceTags(item.GetTags()),
 			ProviderAttributes: item.GetProviderAttributes(),
-			AccountID:          item.GetAccountId(),
+			ScopeID:            item.GetScopeId(),
 		}
 		if timestamp := item.GetLaunchTime(); timestamp != "" {
 			launchTime, err := time.Parse(time.RFC3339, timestamp)

@@ -36,7 +36,7 @@ func launchFailureFromRequestError(req provider.StartInstanceRequest, err error)
 			message,
 			"",
 		)
-	case strings.Contains(lower, "account_id is required"), strings.Contains(lower, "unknown account_id"):
+	case strings.Contains(lower, "scope_id is required"), strings.Contains(lower, "unknown scope_id"):
 		return newLaunchFailure(
 			req,
 			launchFailureCodeConfigInvalid,
@@ -115,7 +115,7 @@ func newLaunchFailure(
 ) *provider.LaunchFailure {
 	attributes := map[string]string{
 		"provider":       "aws",
-		"account_id":     strings.TrimSpace(req.AccountID),
+		"scope_id":       strings.TrimSpace(req.ScopeID),
 		"region":         strings.TrimSpace(req.Region),
 		"zone":           strings.TrimSpace(req.AvailabilityZone),
 		"instance_type":  strings.TrimSpace(req.InstanceType),

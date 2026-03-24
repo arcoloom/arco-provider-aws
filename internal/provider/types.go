@@ -74,7 +74,7 @@ type RequestContext struct {
 }
 
 type ConnectionScope struct {
-	AccountID      string
+	ScopeID        string
 	Region         string
 	Endpoint       string
 	Attributes     map[string]string
@@ -207,7 +207,7 @@ type WatchMarketFeedRequest struct {
 }
 
 type MarketOffering struct {
-	AccountID        string
+	ScopeID          string
 	Region           string
 	AvailabilityZone string
 	ZoneID           string
@@ -297,7 +297,7 @@ type StartInstanceRequest struct {
 	Options          map[string]string
 	Tags             []InstanceTag
 	ProviderConfig   map[string]any
-	AccountID        string
+	ScopeID          string
 }
 
 type StartInstanceResult struct {
@@ -318,7 +318,7 @@ type StopInstanceRequest struct {
 	InstanceID  string
 	Region      string
 	Options     map[string]string
-	AccountID   string
+	ScopeID     string
 }
 
 type StopInstanceResult struct {
@@ -352,7 +352,7 @@ type ActiveInstance struct {
 	LaunchTime         time.Time
 	Tags               []InstanceTag
 	ProviderAttributes map[string]string
-	AccountID          string
+	ScopeID            string
 }
 
 type ListActiveInstancesResult struct {

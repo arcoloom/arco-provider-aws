@@ -38,7 +38,7 @@ func TestValidateConnectionAcceptsOpaqueAccountIDAndRegion(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "acct-prod",
+			ScopeID:   "acct-prod",
 			Region:    "us-east-1",
 		},
 	})
@@ -81,7 +81,7 @@ func TestValidateConnectionDoesNotCompareOpaqueAccountIDToCloudAccount(t *testin
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "acct-other",
+			ScopeID:   "acct-other",
 			Region:    "us-east-1",
 		},
 	})
@@ -124,7 +124,7 @@ func TestValidateConnectionAddsWarningWhenRegionReadIsDenied(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "acct-prod",
+			ScopeID:   "acct-prod",
 			Region:    "us-east-1",
 		},
 	})
@@ -167,7 +167,7 @@ func TestValidateConnectionRejectsRegionErrors(t *testing.T) {
 			},
 		},
 		Scope: provider.ConnectionScope{
-			AccountID: "acct-prod",
+			ScopeID:   "acct-prod",
 			Region:    "us-east-1",
 		},
 	})

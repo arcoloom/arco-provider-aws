@@ -135,8 +135,8 @@ func (s *Service) buildMarketSnapshot(ctx context.Context, req provider.WatchMar
 	}
 	slices.SortFunc(offerings, func(left, right provider.MarketOffering) int {
 		switch {
-		case left.AccountID != right.AccountID:
-			return strings.Compare(left.AccountID, right.AccountID)
+		case left.ScopeID != right.ScopeID:
+			return strings.Compare(left.ScopeID, right.ScopeID)
 		case left.Region != right.Region:
 			return strings.Compare(left.Region, right.Region)
 		case left.AvailabilityZone != right.AvailabilityZone:
@@ -198,7 +198,7 @@ func (s *Service) buildOnDemandMarketOfferings(ctx context.Context, scope provid
 				warnings = append(warnings, invalidPriceWarning("on-demand", region, price.InstanceType, priceValue))
 			}
 			items = append(items, provider.MarketOffering{
-				AccountID:        account.AccountID,
+				ScopeID:          account.ScopeID,
 				Region:           price.Region.Code,
 				AvailabilityZone: "",
 				ZoneID:           "",
@@ -274,7 +274,7 @@ func (s *Service) buildSpotMarketOfferings(ctx context.Context, scope provider.C
 				}
 				attributes := buildMarketOfferingAttributes(record, "spot", spotItem.Price, spotItem.Timestamp, spotItem.Inventory)
 				items = append(items, provider.MarketOffering{
-					AccountID:        account.AccountID,
+					ScopeID:          account.ScopeID,
 					Region:           spotItem.Region,
 					AvailabilityZone: spotItem.AvailabilityZone,
 					ZoneID:           availabilityZoneID(zoneIDToName, spotItem.AvailabilityZone),

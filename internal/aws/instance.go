@@ -22,7 +22,7 @@ func (s *Service) StartInstance(ctx context.Context, req provider.StartInstanceR
 			LaunchFailure: launchFailureFromRequestError(req, err),
 		}, nil
 	}
-	account, err := routeAWSAccount(req.Credentials, req.AccountID, req.Scope)
+	account, err := routeAWSAccount(req.Credentials, req.ScopeID, req.Scope)
 	if err != nil {
 		return provider.StartInstanceResult{
 			StackName:     req.StackName,
@@ -30,7 +30,7 @@ func (s *Service) StartInstance(ctx context.Context, req provider.StartInstanceR
 		}, nil
 	}
 	req.Credentials = provider.Credentials{AWS: &account.Credentials}
-	req.AccountID = account.AccountID
+	req.ScopeID = account.ScopeID
 
 	return s.instanceRunner.Start(ctx, req)
 }
@@ -40,12 +40,12 @@ func (s *Service) StopInstance(ctx context.Context, req provider.StopInstanceReq
 	if err := validateStopInstanceRequest(req); err != nil {
 		return provider.StopInstanceResult{}, err
 	}
-	account, err := routeAWSAccount(req.Credentials, req.AccountID, req.Scope)
+	account, err := routeAWSAccount(req.Credentials, req.ScopeID, req.Scope)
 	if err != nil {
 		return provider.StopInstanceResult{}, err
 	}
 	req.Credentials = provider.Credentials{AWS: &account.Credentials}
-	req.AccountID = account.AccountID
+	req.ScopeID = account.ScopeID
 
 	return s.instanceRunner.Stop(ctx, req)
 }

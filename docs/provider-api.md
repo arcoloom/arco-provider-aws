@@ -117,7 +117,7 @@ Recommendations:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `account_id` | `string` | Account, tenant, or project scope identifier. |
+| `scope_id` | `string` | Account, tenant, or project scope identifier. |
 | `region` | `string` | Logical region. Some RPCs use it as the default region. |
 | `endpoint` | `string` | Custom API endpoint. |
 | `endpoint_region` | `string` | Signing or routing region to use with a custom endpoint. |

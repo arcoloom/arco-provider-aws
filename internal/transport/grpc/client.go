@@ -175,7 +175,7 @@ func (c *Client) StartInstance(ctx context.Context, req provider.StartInstanceRe
 		Options:          req.Options,
 		Tags:             toProtoInstanceTags(req.Tags),
 		ProviderConfig:   toProtoProviderConfig(req.ProviderConfig),
-		AccountId:        req.AccountID,
+		ScopeId:          req.ScopeID,
 	})
 	if err != nil {
 		return provider.StartInstanceResult{}, err
@@ -192,7 +192,7 @@ func (c *Client) StopInstance(ctx context.Context, req provider.StopInstanceRequ
 		InstanceId:  req.InstanceID,
 		Region:      req.Region,
 		Options:     req.Options,
-		AccountId:   req.AccountID,
+		ScopeId:     req.ScopeID,
 	})
 	if err != nil {
 		return provider.StopInstanceResult{}, err

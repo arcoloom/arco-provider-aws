@@ -218,7 +218,7 @@ func (s *Server) StartInstance(ctx context.Context, req *providerv1.StartInstanc
 		Options:          req.GetOptions(),
 		Tags:             toDomainInstanceTags(req.GetTags()),
 		ProviderConfig:   toDomainProviderConfig(req.GetProviderConfig()),
-		AccountID:        req.GetAccountId(),
+		ScopeID:          req.GetScopeId(),
 	}
 
 	result, err := s.service.StartInstance(ctx, domainReq)
@@ -254,7 +254,7 @@ func (s *Server) StopInstance(ctx context.Context, req *providerv1.StopInstanceR
 		InstanceID:  req.GetInstanceId(),
 		Region:      req.GetRegion(),
 		Options:     req.GetOptions(),
-		AccountID:   req.GetAccountId(),
+		ScopeID:     req.GetScopeId(),
 	}
 
 	result, err := s.service.StopInstance(ctx, domainReq)

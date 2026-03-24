@@ -44,7 +44,7 @@ func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActi
 		regionItems, err := listActiveInstancesInRegion(ctx, s.clientFactory.NewEC2(ec2ClientOptions{
 			Config:   regionCfg,
 			Endpoint: req.Scope.Endpoint,
-		}), target.Account.AccountID, target.Region, req)
+		}), target.Account.ScopeID, target.Region, req)
 		if err != nil {
 			return provider.ListActiveInstancesResult{}, err
 		}
@@ -55,8 +55,8 @@ func (s *Service) ListActiveInstances(ctx context.Context, req provider.ListActi
 		left := items[i]
 		right := items[j]
 		switch {
-		case left.AccountID != right.AccountID:
-			return left.AccountID < right.AccountID
+		case left.ScopeID != right.ScopeID:
+			return left.ScopeID < right.ScopeID
 		case left.Region != right.Region:
 			return left.Region < right.Region
 		case left.AvailabilityZone != right.AvailabilityZone:
@@ -265,8 +265,8 @@ func (s *Service) listActiveInstanceTargets(ctx context.Context, req provider.Li
 func sortActiveInstanceScanTargets(targets []activeInstanceScanTarget) []activeInstanceScanTarget {
 	slices.SortFunc(targets, func(left, right activeInstanceScanTarget) int {
 		switch {
-		case left.Account.AccountID != right.Account.AccountID:
-			return strings.Compare(left.Account.AccountID, right.Account.AccountID)
+		case left.Account.ScopeID != right.Account.ScopeID:
+			return strings.Compare(left.Account.ScopeID, right.Account.ScopeID)
 		default:
 			return strings.Compare(left.Region, right.Region)
 		}
@@ -292,16 +292,16 @@ func encodeActiveInstanceCursor(target activeInstanceScanTarget, multiAccount bo
 	if !multiAccount {
 		return strings.TrimSpace(target.Region)
 	}
-	return strings.TrimSpace(target.Account.AccountID) + "::" + strings.TrimSpace(target.Region)
+	return strings.TrimSpace(target.Account.ScopeID) + "::" + strings.TrimSpace(target.Region)
 }
 
 func hasMultipleActiveInstanceAccounts(targets []activeInstanceScanTarget) bool {
 	if len(targets) <= 1 {
 		return false
 	}
-	first := strings.TrimSpace(targets[0].Account.AccountID)
+	first := strings.TrimSpace(targets[0].Account.ScopeID)
 	for _, target := range targets[1:] {
-		if strings.TrimSpace(target.Account.AccountID) != first {
+		if strings.TrimSpace(target.Account.ScopeID) != first {
 			return true
 		}
 	}
@@ -492,7 +492,7 @@ func buildActiveInstance(accountID string, region string, instance ec2types.Inst
 		LaunchTime:         awsv2.ToTime(instance.LaunchTime),
 		Tags:               tags,
 		ProviderAttributes: providerAttributes,
-		AccountID:          strings.TrimSpace(accountID),
+		ScopeID:            strings.TrimSpace(accountID),
 	}
 }
 

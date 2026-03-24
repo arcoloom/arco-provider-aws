@@ -194,7 +194,7 @@ func toProtoMarketOfferings(items []provider.MarketOffering) []*providerv1.Marke
 	result := make([]*providerv1.MarketOffering, 0, len(items))
 	for _, item := range items {
 		result = append(result, &providerv1.MarketOffering{
-			AccountId:        item.AccountID,
+			ScopeId:          item.ScopeID,
 			Region:           item.Region,
 			AvailabilityZone: item.AvailabilityZone,
 			ZoneId:           item.ZoneID,
@@ -312,7 +312,7 @@ func toProtoActiveInstances(items []provider.ActiveInstance) []*providerv1.Activ
 			Ipv6Addresses:      item.IPv6Addresses,
 			Tags:               toProtoInstanceTags(item.Tags),
 			ProviderAttributes: item.ProviderAttributes,
-			AccountId:          item.AccountID,
+			ScopeId:            item.ScopeID,
 		}
 		if !item.LaunchTime.IsZero() {
 			protoItem.LaunchTime = item.LaunchTime.Format(time.RFC3339)
@@ -495,7 +495,7 @@ func toDomainScope(scope *providerv1.ConnectionScope) provider.ConnectionScope {
 	}
 
 	return provider.ConnectionScope{
-		AccountID:      scope.GetAccountId(),
+		ScopeID:        scope.GetScopeId(),
 		Region:         scope.GetRegion(),
 		Endpoint:       scope.GetEndpoint(),
 		Attributes:     scope.GetAttributes(),
