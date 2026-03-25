@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -322,6 +323,13 @@ func TestEC2RunnerDryRunStartAndStop(t *testing.T) {
 
 func TestStartInstanceCreatesEC2InstanceViaAWSSDK(t *testing.T) {
 	ec2Client := &recordingEC2Client{
+		fakeEC2Client: fakeEC2Client{
+			imagesOutput: &ec2.DescribeImagesOutput{
+				Images: []ec2types.Image{
+					{RootDeviceName: awsv2.String("/dev/xvda")},
+				},
+			},
+		},
 		describeInstanceTypesOutput: &ec2.DescribeInstanceTypesOutput{
 			InstanceTypes: []ec2types.InstanceTypeInfo{
 				{
@@ -627,6 +635,11 @@ func TestStartInstanceCreatesManagedNetworkWhenMissing(t *testing.T) {
 			routeTablesOutput:      &ec2.DescribeRouteTablesOutput{},
 			subnetsOutput:          &ec2.DescribeSubnetsOutput{},
 			securityGroupsOutput:   &ec2.DescribeSecurityGroupsOutput{},
+			imagesOutput: &ec2.DescribeImagesOutput{
+				Images: []ec2types.Image{
+					{RootDeviceName: awsv2.String("/dev/xvda")},
+				},
+			},
 		},
 		createVpcOutput: &ec2.CreateVpcOutput{
 			Vpc: &ec2types.Vpc{
@@ -975,8 +988,8 @@ func TestEnsureManagedSubnetReadyWaitsForAssociatedCIDRBeforeIPv6AutoAssign(t *t
 	}
 }
 
-func TestResolveDebian13AMIPrefersMatchingArchitecture(t *testing.T) {
-	amiID, parameterName := pickDebian13AMI([]ssmtypes.Parameter{
+func TestResolveDebianAMIPrefersMatchingArchitecture(t *testing.T) {
+	amiID, parameterName := pickDebianAMI([]ssmtypes.Parameter{
 		{
 			Name:  awsv2.String("/aws/service/debian/release/13/latest/arm64"),
 			Value: awsv2.String("ami-arm64"),
@@ -989,9 +1002,30 @@ func TestResolveDebian13AMIPrefersMatchingArchitecture(t *testing.T) {
 			Name:  awsv2.String("/aws/service/debian/release/13/latest/amd64/ami-id"),
 			Value: awsv2.String("ami-amd64-best"),
 		},
-	}, "amd64")
+	}, "amd64", debian13AMIPathRoot)
 	if amiID != "ami-amd64-best" || parameterName != "/aws/service/debian/release/13/latest/amd64/ami-id" {
 		t.Fatalf("unexpected Debian 13 AMI selection: ami=%q parameter=%q", amiID, parameterName)
+	}
+}
+
+func TestResolveUbuntu2404AMIUsesCanonicalParameter(t *testing.T) {
+	ssmClient := &recordingSSMClient{
+		output: &ssm.GetParameterOutput{
+			Parameter: &ssmtypes.Parameter{
+				Value: awsv2.String("ami-ubuntu2404"),
+			},
+		},
+	}
+
+	amiID, err := resolveUbuntu2404AMI(context.Background(), ssmClient, "arm64")
+	if err != nil {
+		t.Fatalf("resolveUbuntu2404AMI() error = %v", err)
+	}
+	if amiID != "ami-ubuntu2404" {
+		t.Fatalf("amiID = %q, want %q", amiID, "ami-ubuntu2404")
+	}
+	if ssmClient.input == nil || awsv2.ToString(ssmClient.input.Name) != fmt.Sprintf(ubuntu2404AMIPathFormat, "arm64") {
+		t.Fatalf("unexpected ubuntu 24.04 parameter lookup: %+v", ssmClient.input)
 	}
 }
 

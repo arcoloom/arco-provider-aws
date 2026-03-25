@@ -8,12 +8,15 @@ import (
 
 const (
 	providerConfigAMI              = "ami"
+	providerConfigOS               = "os"
 	providerConfigNetworkMode      = "network_mode"
 	providerConfigSubnetID         = "subnet_id"
 	providerConfigSecurityGroupIDs = "security_group_ids"
 	providerConfigKeyName          = "key_name"
 	providerAttributeSubnetID      = "subnet_id"
 	providerAttributeVPCID         = "vpc_id"
+	providerOSDebian13             = "debian-13"
+	providerOSUbuntu2404LTS        = "ubuntu-24.04-lts"
 	providerNetworkModeIPv4        = "ipv4"
 	providerNetworkModeIPv6        = "ipv6"
 	providerNetworkModeDualStack   = "ipv4+ipv6"
@@ -21,6 +24,7 @@ const (
 
 type startInstanceProviderConfig struct {
 	AMI              string
+	OS               string
 	NetworkMode      string
 	SubnetID         string
 	SecurityGroupIDs []string
@@ -33,6 +37,10 @@ func parseStartInstanceProviderConfig(config map[string]any) (startInstanceProvi
 	var err error
 
 	result.AMI = parseStringProviderConfig(config, providerConfigAMI)
+	result.OS, err = parseOSProviderConfig(config)
+	if err != nil {
+		return startInstanceProviderConfig{}, err
+	}
 	result.NetworkMode, err = parseNetworkModeProviderConfig(config)
 	if err != nil {
 		return startInstanceProviderConfig{}, err
@@ -53,8 +61,30 @@ func parseStartInstanceProviderConfig(config map[string]any) (startInstanceProvi
 	return result, nil
 }
 
+func parseOSProviderConfig(config map[string]any) (string, error) {
+	value, ok := lookupProviderConfigValue(config, providerConfigOS)
+	if !ok {
+		return providerOSDebian13, nil
+	}
+
+	switch comparableOS(strings.TrimSpace(asString(value))) {
+	case "debian13":
+		return providerOSDebian13, nil
+	case "ubuntu2404lts":
+		return providerOSUbuntu2404LTS, nil
+	default:
+		return "", fmt.Errorf("provider_config.%s must be one of %s or %s", providerConfigOS, providerOSDebian13, providerOSUbuntu2404LTS)
+	}
+}
+
+func comparableOS(value string) string {
+	return strings.NewReplacer(" ", "", "-", "", "_", "", ".", "").Replace(strings.ToLower(strings.TrimSpace(value)))
+}
+
 func parseStartInstanceLaunchProviderConfig(config map[string]any, networkMode string) (startInstanceLaunchOptions, error) {
-	result := startInstanceLaunchOptions{}
+	result := startInstanceLaunchOptions{
+		rootVolumeSizeGiB: defaultRootVolumeSizeGiB,
+	}
 	var (
 		err                 error
 		hasAssignPublicIPv6 bool
@@ -81,6 +111,9 @@ func parseStartInstanceLaunchProviderConfig(config map[string]any, networkMode s
 	}
 	if result.rootVolumeSizeGiB, _, err = parsePositiveInt32ProviderConfig(config, optionRootVolumeSizeGiB); err != nil {
 		return startInstanceLaunchOptions{}, err
+	}
+	if result.rootVolumeSizeGiB == 0 {
+		result.rootVolumeSizeGiB = defaultRootVolumeSizeGiB
 	}
 
 	if result.useDefaultVPC {

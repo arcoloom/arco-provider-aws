@@ -83,3 +83,51 @@ func TestParseStartInstanceProviderConfigRejectsInvalidNetworkMode(t *testing.T)
 		t.Fatal("expected validation error for invalid network_mode")
 	}
 }
+
+func TestParseStartInstanceProviderConfigDefaultsRootVolumeSize(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := parseStartInstanceProviderConfig(map[string]any{})
+	if err != nil {
+		t.Fatalf("parseStartInstanceProviderConfig() error = %v", err)
+	}
+	if cfg.LaunchOptions.rootVolumeSizeGiB != defaultRootVolumeSizeGiB {
+		t.Fatalf("cfg.LaunchOptions.rootVolumeSizeGiB = %d, want %d", cfg.LaunchOptions.rootVolumeSizeGiB, defaultRootVolumeSizeGiB)
+	}
+}
+
+func TestParseStartInstanceProviderConfigDefaultsOS(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := parseStartInstanceProviderConfig(map[string]any{})
+	if err != nil {
+		t.Fatalf("parseStartInstanceProviderConfig() error = %v", err)
+	}
+	if cfg.OS != providerOSDebian13 {
+		t.Fatalf("cfg.OS = %q, want %q", cfg.OS, providerOSDebian13)
+	}
+}
+
+func TestParseStartInstanceProviderConfigSupportsOSAliases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input any
+		want  string
+	}{
+		{input: "debian13", want: providerOSDebian13},
+		{input: "ubuntu-24.04-lts", want: providerOSUbuntu2404LTS},
+	}
+
+	for _, tt := range tests {
+		cfg, err := parseStartInstanceProviderConfig(map[string]any{
+			providerConfigOS: tt.input,
+		})
+		if err != nil {
+			t.Fatalf("parseStartInstanceProviderConfig(%v) error = %v", tt.input, err)
+		}
+		if cfg.OS != tt.want {
+			t.Fatalf("cfg.OS = %q, want %q", cfg.OS, tt.want)
+		}
+	}
+}

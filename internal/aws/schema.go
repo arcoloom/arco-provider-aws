@@ -135,7 +135,14 @@ func awsComputeInstanceSchema() provider.ResourceSchema {
 				Name:        "ami",
 				Type:        provider.SchemaAttributeTypeString,
 				Optional:    true,
-				Description: "AMI identifier. When omitted, the provider resolves the latest Debian 13 image for the selected instance architecture.",
+				Description: "AMI identifier. When omitted, the provider resolves the latest image for the selected OS and instance architecture.",
+			},
+			{
+				Name:         "os",
+				Type:         provider.SchemaAttributeTypeString,
+				Optional:     true,
+				Description:  "Operating system image to resolve when ami is omitted. Supported values: debian-13, ubuntu-24.04-lts.",
+				DefaultValue: providerOSDebian13,
 			},
 			{
 				Name:        "subnet_id",
@@ -202,10 +209,11 @@ func awsComputeInstanceSchema() provider.ResourceSchema {
 				Description: "Number of IPv6 addresses to allocate on the primary network interface.",
 			},
 			{
-				Name:        "root_volume_size_gib",
-				Type:        provider.SchemaAttributeTypeInt64,
-				Optional:    true,
-				Description: "Root volume size in GiB for the launched instance.",
+				Name:         "root_volume_size_gib",
+				Type:         provider.SchemaAttributeTypeInt64,
+				Optional:     true,
+				Description:  "Root volume size in GiB for the launched instance.",
+				DefaultValue: int64(defaultRootVolumeSizeGiB),
 			},
 		},
 	}

@@ -20,6 +20,7 @@ const (
 	optionAssignPublicIPv6        = "assign_public_ipv6"
 	optionIPv6AddressCount        = "ipv6_address_count"
 	optionRootVolumeSizeGiB       = "root_volume_size_gib"
+	defaultRootVolumeSizeGiB      = 20
 )
 
 type startInstanceLaunchOptions struct {
@@ -116,7 +117,9 @@ func resolveRunInstancesConfig(
 }
 
 func parseStartInstanceLaunchOptions(options map[string]string) (startInstanceLaunchOptions, error) {
-	result := startInstanceLaunchOptions{}
+	result := startInstanceLaunchOptions{
+		rootVolumeSizeGiB: defaultRootVolumeSizeGiB,
+	}
 
 	var err error
 	if result.useDefaultVPC, _, err = parseBoolOption(options, optionUseDefaultVPC); err != nil {
@@ -139,6 +142,9 @@ func parseStartInstanceLaunchOptions(options map[string]string) (startInstanceLa
 	}
 	if result.rootVolumeSizeGiB, _, err = parsePositiveInt32Option(options, optionRootVolumeSizeGiB); err != nil {
 		return startInstanceLaunchOptions{}, err
+	}
+	if result.rootVolumeSizeGiB == 0 {
+		result.rootVolumeSizeGiB = defaultRootVolumeSizeGiB
 	}
 
 	if result.useDefaultVPC {

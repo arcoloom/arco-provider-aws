@@ -23,6 +23,7 @@ const (
 	managedByTagValue          = "arcoloom"
 	stackTagKey                = "ArcoloomStack"
 	debian13AMIPathRoot        = "/aws/service/debian/release/13/latest"
+	ubuntu2404AMIPathFormat    = "/aws/service/canonical/ubuntu/server/24.04/stable/current/%s/hvm/ebs-gp3/ami-id"
 	dryRunOptionKey            = "dry_run"
 	dryRunInstanceIDPrefix     = "dry-run-"
 	warningCodeDryRun          = "DRY_RUN"
@@ -165,7 +166,14 @@ func resolveAMI(
 		return "", err
 	}
 
-	return resolveDebian13AMI(ctx, ssmClient, architecture)
+	switch config.OS {
+	case "", providerOSDebian13:
+		return resolveDebianAMI(ctx, ssmClient, architecture, "13", debian13AMIPathRoot)
+	case providerOSUbuntu2404LTS:
+		return resolveUbuntu2404AMI(ctx, ssmClient, architecture)
+	default:
+		return "", fmt.Errorf("unsupported provider config os %q", config.OS)
+	}
 }
 
 func defaultAMIArchitecture(ctx context.Context, ec2Client ec2API, instanceType string) (string, error) {
@@ -173,7 +181,7 @@ func defaultAMIArchitecture(ctx context.Context, ec2Client ec2API, instanceType 
 		InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(instanceType)},
 	})
 	if err != nil {
-		return "", fmt.Errorf("describe instance type %s for default debian 13 ami selection: %w", instanceType, err)
+		return "", fmt.Errorf("describe instance type %s for default ami selection: %w", instanceType, err)
 	}
 	if len(output.InstanceTypes) == 0 {
 		return "", fmt.Errorf("instance type %s was not found", instanceType)
@@ -188,10 +196,10 @@ func defaultAMIArchitecture(ctx context.Context, ec2Client ec2API, instanceType 
 		}
 	}
 
-	return "", fmt.Errorf("instance type %s does not report a supported debian 13 architecture", instanceType)
+	return "", fmt.Errorf("instance type %s does not report a supported linux image architecture", instanceType)
 }
 
-func resolveDebian13AMI(ctx context.Context, ssmClient ssmAPI, architecture string) (string, error) {
+func resolveDebianAMI(ctx context.Context, ssmClient ssmAPI, architecture string, release string, pathRoot string) (string, error) {
 	var (
 		nextToken  *string
 		candidates []ssmtypes.Parameter
@@ -199,13 +207,13 @@ func resolveDebian13AMI(ctx context.Context, ssmClient ssmAPI, architecture stri
 
 	for {
 		output, err := ssmClient.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
-			Path:           awsv2.String(debian13AMIPathRoot),
+			Path:           awsv2.String(pathRoot),
 			Recursive:      awsv2.Bool(true),
 			WithDecryption: awsv2.Bool(false),
 			NextToken:      nextToken,
 		})
 		if err != nil {
-			return "", fmt.Errorf("resolve default debian 13 ami from %s: %w", debian13AMIPathRoot, err)
+			return "", fmt.Errorf("resolve default debian %s ami from %s: %w", release, pathRoot, err)
 		}
 
 		candidates = append(candidates, output.Parameters...)
@@ -215,18 +223,33 @@ func resolveDebian13AMI(ctx context.Context, ssmClient ssmAPI, architecture stri
 		nextToken = output.NextToken
 	}
 
-	amiID, parameterName := pickDebian13AMI(candidates, architecture)
+	amiID, parameterName := pickDebianAMI(candidates, architecture, pathRoot)
 	if amiID == "" {
-		return "", fmt.Errorf("no debian 13 ami parameter under %s matched architecture %s", debian13AMIPathRoot, architecture)
+		return "", fmt.Errorf("no debian %s ami parameter under %s matched architecture %s", release, pathRoot, architecture)
 	}
 	if parameterName == "" {
-		return "", fmt.Errorf("debian 13 ami resolution for architecture %s returned an unnamed parameter", architecture)
+		return "", fmt.Errorf("debian %s ami resolution for architecture %s returned an unnamed parameter", release, architecture)
 	}
 
 	return amiID, nil
 }
 
-func pickDebian13AMI(parameters []ssmtypes.Parameter, architecture string) (string, string) {
+func resolveUbuntu2404AMI(ctx context.Context, ssmClient ssmAPI, architecture string) (string, error) {
+	paramName := fmt.Sprintf(ubuntu2404AMIPathFormat, architecture)
+	output, err := ssmClient.GetParameter(ctx, &ssm.GetParameterInput{
+		Name: awsv2.String(paramName),
+	})
+	if err != nil {
+		return "", fmt.Errorf("resolve ubuntu 24.04 lts ami from %s: %w", paramName, err)
+	}
+	amiID := strings.TrimSpace(awsv2.ToString(output.Parameter.Value))
+	if amiID == "" || !strings.HasPrefix(amiID, "ami-") {
+		return "", fmt.Errorf("ubuntu 24.04 lts ami parameter %s did not contain a valid ami id", paramName)
+	}
+	return amiID, nil
+}
+
+func pickDebianAMI(parameters []ssmtypes.Parameter, architecture string, pathRoot string) (string, string) {
 	bestScore := -1
 	bestVersion := -1
 	bestName := ""
@@ -239,7 +262,7 @@ func pickDebian13AMI(parameters []ssmtypes.Parameter, architecture string) (stri
 			continue
 		}
 
-		score := debian13AMIScore(name, architecture)
+		score := debianAMIScore(name, architecture, pathRoot)
 		if score < 0 {
 			continue
 		}
@@ -256,9 +279,9 @@ func pickDebian13AMI(parameters []ssmtypes.Parameter, architecture string) (stri
 	return bestValue, bestName
 }
 
-func debian13AMIScore(name string, architecture string) int {
+func debianAMIScore(name string, architecture string, pathRoot string) int {
 	normalized := strings.ToLower(strings.TrimSpace(name))
-	if !strings.HasPrefix(normalized, debian13AMIPathRoot) {
+	if !strings.HasPrefix(normalized, pathRoot) {
 		return -1
 	}
 

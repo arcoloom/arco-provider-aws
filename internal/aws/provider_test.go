@@ -56,8 +56,10 @@ func TestSchema(t *testing.T) {
 	}
 
 	foundAMI := false
+	foundOS := false
 	foundNetworkMode := false
 	foundSecurityGroups := false
+	foundRootVolumeSize := false
 	for _, attribute := range resources[0].Attributes {
 		switch attribute.Name {
 		case "ami":
@@ -70,14 +72,24 @@ func TestSchema(t *testing.T) {
 			if attribute.Type != provider.SchemaAttributeTypeStringList {
 				t.Fatalf("unexpected security_group_ids attribute: %+v", attribute)
 			}
+		case "os":
+			foundOS = true
+			if attribute.Type != provider.SchemaAttributeTypeString || !attribute.Optional || attribute.DefaultValue != providerOSDebian13 {
+				t.Fatalf("unexpected os attribute: %+v", attribute)
+			}
 		case "network_mode":
 			foundNetworkMode = true
 			if attribute.Type != provider.SchemaAttributeTypeString || !attribute.Optional {
 				t.Fatalf("unexpected network_mode attribute: %+v", attribute)
 			}
+		case "root_volume_size_gib":
+			foundRootVolumeSize = true
+			if attribute.Type != provider.SchemaAttributeTypeInt64 || !attribute.Optional || attribute.DefaultValue != int64(defaultRootVolumeSizeGiB) {
+				t.Fatalf("unexpected root_volume_size_gib attribute: %+v", attribute)
+			}
 		}
 	}
-	if !foundAMI || !foundNetworkMode || !foundSecurityGroups {
+	if !foundAMI || !foundOS || !foundNetworkMode || !foundSecurityGroups || !foundRootVolumeSize {
 		t.Fatalf("expected aws launch attributes in schema, got %+v", resources[0].Attributes)
 	}
 }
