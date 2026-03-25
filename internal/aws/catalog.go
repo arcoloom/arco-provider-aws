@@ -19,10 +19,6 @@ import (
 )
 
 const (
-	instanceMetadataURL = "https://raw.githubusercontent.com/arcoloom/arco-catalog/refs/heads/main/data/aws/instance_metadata.json"
-	instanceRegionsURL  = "https://raw.githubusercontent.com/arcoloom/arco-catalog/refs/heads/main/data/aws/instance_regions.json"
-	seriesModelsURL     = "https://raw.githubusercontent.com/arcoloom/arco-catalog/refs/heads/main/data/aws/series_models.json"
-
 	defaultCatalogCacheTTL   = 7 * 24 * time.Hour
 	defaultOperatingSystem   = "Linux"
 	defaultTenancy           = "Shared"
@@ -68,6 +64,7 @@ type catalogRepository struct {
 	baseDir string
 	fetcher remoteFetcher
 	now     func() time.Time
+	source  registryDatasetSource
 
 	mu          sync.Mutex
 	cached      *catalogSnapshot
@@ -156,6 +153,7 @@ func newCatalogRepository() *catalogRepository {
 		fetcher: httpRemoteFetcher{
 			client: &http.Client{Timeout: 30 * time.Second},
 		},
+		source:      defaultRegistryDatasetSource(),
 		now:         time.Now,
 		cacheWindow: 5 * time.Minute,
 	}
@@ -170,18 +168,8 @@ func (r *catalogRepository) loadCatalog(ctx context.Context) (catalogSnapshot, e
 	}
 	r.mu.Unlock()
 
-	var metadata []catalogInstanceMetadataRecord
-	if err := r.loadCachedJSON(ctx, "catalog/instance_metadata.json", instanceMetadataURL, defaultCatalogCacheTTL, &metadata); err != nil {
-		return catalogSnapshot{}, err
-	}
-
-	var regions []catalogRegionRecord
-	if err := r.loadCachedJSON(ctx, "catalog/instance_regions.json", instanceRegionsURL, defaultCatalogCacheTTL, &regions); err != nil {
-		return catalogSnapshot{}, err
-	}
-
-	var seriesModels []catalogSeriesModelsRecord
-	if err := r.loadCachedJSON(ctx, "catalog/series_models.json", seriesModelsURL, defaultCatalogCacheTTL, &seriesModels); err != nil {
+	metadata, regions, seriesModels, err := r.loadRegistryCatalog(ctx)
+	if err != nil {
 		return catalogSnapshot{}, err
 	}
 

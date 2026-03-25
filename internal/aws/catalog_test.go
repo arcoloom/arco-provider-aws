@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -206,9 +207,7 @@ type staticCatalogFetcher struct {
 }
 
 func newStaticCatalogFetcher() *staticCatalogFetcher {
-	return &staticCatalogFetcher{
-		responses: map[string][]byte{
-			instanceMetadataURL: []byte(`[
+	metadataBody := []byte(`[
   {
     "series": "c6a",
     "instance_type": "c6a.large",
@@ -284,8 +283,8 @@ func newStaticCatalogFetcher() *staticCatalogFetcher {
     "storage": null,
     "support_os": ["linux", "ubuntu"]
   }
-]`),
-			instanceRegionsURL: []byte(`[
+]`)
+	regionsBody := []byte(`[
   {
     "series": "c6a",
     "instance_type": "c6a.large",
@@ -314,8 +313,8 @@ func newStaticCatalogFetcher() *staticCatalogFetcher {
     "region_name": "US East (N. Virginia)",
     "on_demand_price": "0.7520000000"
   }
-]`),
-			seriesModelsURL: []byte(`[
+]`)
+	seriesModelsBody := []byte(`[
   {
     "series": "c6a",
     "instance_count": 1,
@@ -331,9 +330,63 @@ func newStaticCatalogFetcher() *staticCatalogFetcher {
     "instance_count": 1,
     "instance_types": ["g6f.large"]
   }
-]`),
+]`)
+	resolveBody := []byte(fmt.Sprintf(`{
+  "schema": "arco.dataset.resolve.v1",
+  "channel": "latest",
+  "dataset": {
+    "provider": "aws",
+    "name": "ec2",
+    "version": "test-catalog-version"
+  },
+  "files": {
+    "instance_metadata": {
+      "key": "datasets/aws/ec2/test-catalog-version/instance_metadata.json",
+      "filename": "instance_metadata.json",
+      "sha256": "%s",
+      "size": %d,
+      "content_type": "application/json",
+      "download_url": "%s"
+    },
+    "instance_regions": {
+      "key": "datasets/aws/ec2/test-catalog-version/instance_regions.json",
+      "filename": "instance_regions.json",
+      "sha256": "%s",
+      "size": %d,
+      "content_type": "application/json",
+      "download_url": "%s"
+    },
+    "series_models": {
+      "key": "datasets/aws/ec2/test-catalog-version/series_models.json",
+      "filename": "series_models.json",
+      "sha256": "%s",
+      "size": %d,
+      "content_type": "application/json",
+      "download_url": "%s"
+    }
+  }
+}`,
+		sha256Hex(metadataBody), len(metadataBody), registryDatasetDownloadURL("instance_metadata.json"),
+		sha256Hex(regionsBody), len(regionsBody), registryDatasetDownloadURL("instance_regions.json"),
+		sha256Hex(seriesModelsBody), len(seriesModelsBody), registryDatasetDownloadURL("series_models.json"),
+	))
+
+	return &staticCatalogFetcher{
+		responses: map[string][]byte{
+			registryDatasetResolveURL():                          resolveBody,
+			registryDatasetDownloadURL("instance_metadata.json"): metadataBody,
+			registryDatasetDownloadURL("instance_regions.json"):  regionsBody,
+			registryDatasetDownloadURL("series_models.json"):     seriesModelsBody,
 		},
 	}
+}
+
+func registryDatasetResolveURL() string {
+	return fmt.Sprintf("%s/v1/resolve/datasets/aws/ec2/latest", defaultRegistryBaseURL)
+}
+
+func registryDatasetDownloadURL(filename string) string {
+	return fmt.Sprintf("%s/v1/datasets/aws/ec2/test-catalog-version/%s", defaultRegistryBaseURL, filename)
 }
 
 func (f *staticCatalogFetcher) Fetch(_ context.Context, url string) ([]byte, error) {
