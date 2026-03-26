@@ -378,6 +378,15 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 	if strings.TrimSpace(record.GPUModel) != "" {
 		attributes["gpu_model"] = strings.TrimSpace(record.GPUModel)
 	}
+	if familyClass := plannerFamilyClass(record.Family); familyClass != "" {
+		attributes["family_class"] = familyClass
+	}
+	if generationRank := plannerGenerationRank(record.Generation); generationRank != "" {
+		attributes["generation_rank"] = generationRank
+	}
+	if memoryPerVCPU := plannerMemoryPerVCPU(float64(record.VCPU), record.Memory); memoryPerVCPU != "" {
+		attributes["memory_per_vcpu"] = memoryPerVCPU
+	}
 	if strings.TrimSpace(price) != "" {
 		attributes["spot_price"] = strings.TrimSpace(price)
 	}
@@ -454,6 +463,39 @@ func normalizeMarketArchitecture(value string) string {
 	default:
 		return ""
 	}
+}
+
+func plannerFamilyClass(value string) string {
+	switch normalizeFamilyCategory(value) {
+	case "compute-optimized":
+		return "compute"
+	case "general-purpose":
+		return "general"
+	case "memory-optimized":
+		return "memory"
+	case "burstable-performance":
+		return "burstable"
+	default:
+		return ""
+	}
+}
+
+func plannerGenerationRank(value string) string {
+	switch normalizeToken(value) {
+	case "current":
+		return "4"
+	case "previous":
+		return "2"
+	default:
+		return ""
+	}
+}
+
+func plannerMemoryPerVCPU(vcpu float64, memoryGiB float64) string {
+	if vcpu <= 0 || memoryGiB <= 0 {
+		return ""
+	}
+	return strconv.FormatFloat(memoryGiB/vcpu, 'f', 2, 64)
 }
 
 func availabilityZoneID(zoneIDToName map[string]string, zoneName string) string {
