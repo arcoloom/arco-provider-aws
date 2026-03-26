@@ -20,14 +20,13 @@ import (
 )
 
 const (
-	managedByTagValue          = "arcoloom"
-	stackTagKey                = "ArcoloomStack"
-	debian13AMIPathRoot        = "/aws/service/debian/release/13/latest"
-	ubuntu2404AMIPathFormat    = "/aws/service/canonical/ubuntu/server/24.04/stable/current/%s/hvm/ebs-gp3/ami-id"
-	dryRunOptionKey            = "dry_run"
-	dryRunInstanceIDPrefix     = "dry-run-"
-	warningCodeDryRun          = "DRY_RUN"
-	warningCodeInstancesAbsent = "INSTANCES_NOT_FOUND"
+	managedByTagValue       = "arcoloom"
+	stackTagKey             = "ArcoloomStack"
+	debian13AMIPathRoot     = "/aws/service/debian/release/13/latest"
+	ubuntu2404AMIPathFormat = "/aws/service/canonical/ubuntu/server/24.04/stable/current/%s/hvm/ebs-gp3/ami-id"
+	dryRunOptionKey         = "dry_run"
+	dryRunInstanceIDPrefix  = "dry-run-"
+	warningCodeDryRun       = "DRY_RUN"
 )
 
 type ec2InstanceLifecycleRunner struct {

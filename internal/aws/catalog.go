@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	defaultCatalogCacheTTL   = 7 * 24 * time.Hour
 	defaultOperatingSystem   = "Linux"
 	defaultTenancy           = "Shared"
 	defaultPreinstalledSoft  = "NA"
@@ -284,18 +283,6 @@ func buildCatalogSnapshot(
 		pricesByKey:    pricesByKey,
 		seriesToTypes:  seriesToTypes,
 	}
-}
-
-func (r *catalogRepository) loadCachedJSON(ctx context.Context, relativePath string, sourceURL string, ttl time.Duration, target any) error {
-	body, err := r.readThroughCache(ctx, relativePath, sourceURL, ttl)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, target); err != nil {
-		return fmt.Errorf("decode %s: %w", relativePath, err)
-	}
-
-	return nil
 }
 
 func (r *catalogRepository) readThroughCache(ctx context.Context, relativePath string, sourceURL string, ttl time.Duration) ([]byte, error) {
@@ -679,13 +666,6 @@ func stringifyAttribute(value any) string {
 		}
 		return string(encoded)
 	}
-}
-
-func supportsCatalogOnDemandPriceFilters(operatingSystem, tenancy, preinstalledSoftware, licenseModel string) bool {
-	return operatingSystem == defaultOperatingSystem &&
-		tenancy == defaultTenancy &&
-		preinstalledSoftware == defaultPreinstalledSoft &&
-		licenseModel == defaultLicenseModel
 }
 
 func priceKey(instanceType string, region string) string {

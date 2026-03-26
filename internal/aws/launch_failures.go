@@ -11,7 +11,6 @@ import (
 const (
 	launchFailureCodeCapacityUnavailable = "CAPACITY_UNAVAILABLE"
 	launchFailureCodeQuotaExceeded       = "QUOTA_EXCEEDED"
-	launchFailureCodePriceInvalid        = "PRICE_INVALID"
 	launchFailureCodeAPIThrottled        = "API_THROTTLED"
 	launchFailureCodeAuthInvalid         = "AUTH_INVALID"
 	launchFailureCodeConfigInvalid       = "CONFIG_INVALID"
@@ -114,14 +113,14 @@ func newLaunchFailure(
 	rawCode string,
 ) *provider.LaunchFailure {
 	attributes := map[string]string{
-		"provider":       "aws",
-		"scope_id":       strings.TrimSpace(req.ScopeID),
-		"region":         strings.TrimSpace(req.Region),
-		"zone":           strings.TrimSpace(req.AvailabilityZone),
-		"instance_type":  strings.TrimSpace(req.InstanceType),
-		"pricing_model":  string(req.MarketType),
-		"stack_name":     strings.TrimSpace(req.StackName),
-		"instance_name":  strings.TrimSpace(req.InstanceName),
+		"provider":      "aws",
+		"scope_id":      strings.TrimSpace(req.ScopeID),
+		"region":        strings.TrimSpace(req.Region),
+		"zone":          strings.TrimSpace(req.AvailabilityZone),
+		"instance_type": strings.TrimSpace(req.InstanceType),
+		"pricing_model": string(req.MarketType),
+		"stack_name":    strings.TrimSpace(req.StackName),
+		"instance_name": strings.TrimSpace(req.InstanceName),
 	}
 	if strings.TrimSpace(rawCode) != "" {
 		attributes["raw_code"] = strings.TrimSpace(rawCode)

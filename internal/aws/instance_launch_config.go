@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
@@ -116,80 +115,6 @@ func resolveRunInstancesConfig(
 	return result, nil
 }
 
-func parseStartInstanceLaunchOptions(options map[string]string) (startInstanceLaunchOptions, error) {
-	result := startInstanceLaunchOptions{
-		rootVolumeSizeGiB: defaultRootVolumeSizeGiB,
-	}
-
-	var err error
-	if result.useDefaultVPC, _, err = parseBoolOption(options, optionUseDefaultVPC); err != nil {
-		return startInstanceLaunchOptions{}, err
-	}
-	if result.useDefaultSubnet, _, err = parseBoolOption(options, optionUseDefaultSubnet); err != nil {
-		return startInstanceLaunchOptions{}, err
-	}
-	if result.useDefaultSecurityGroup, _, err = parseBoolOption(options, optionUseDefaultSecurityGroup); err != nil {
-		return startInstanceLaunchOptions{}, err
-	}
-	if result.associatePublicIPv4, result.hasAssociatePublicIPv4, err = parseBoolOption(options, optionAssociatePublicIPv4); err != nil {
-		return startInstanceLaunchOptions{}, err
-	}
-	if result.assignPublicIPv6, _, err = parseBoolOption(options, optionAssignPublicIPv6); err != nil {
-		return startInstanceLaunchOptions{}, err
-	}
-	if result.ipv6AddressCount, _, err = parsePositiveInt32Option(options, optionIPv6AddressCount); err != nil {
-		return startInstanceLaunchOptions{}, err
-	}
-	if result.rootVolumeSizeGiB, _, err = parsePositiveInt32Option(options, optionRootVolumeSizeGiB); err != nil {
-		return startInstanceLaunchOptions{}, err
-	}
-	if result.rootVolumeSizeGiB == 0 {
-		result.rootVolumeSizeGiB = defaultRootVolumeSizeGiB
-	}
-
-	if result.useDefaultVPC {
-		result.useDefaultSubnet = true
-	}
-	if result.assignPublicIPv6 && result.ipv6AddressCount == 0 {
-		result.ipv6AddressCount = 1
-	}
-
-	return result, nil
-}
-
-func parseBoolOption(options map[string]string, key string) (bool, bool, error) {
-	value, ok := lookupOptionValue(options, key)
-	if !ok {
-		return false, false, nil
-	}
-
-	switch normalizeToken(value) {
-	case "1", "true", "yes", "on":
-		return true, true, nil
-	case "0", "false", "no", "off":
-		return false, true, nil
-	default:
-		return false, true, fmt.Errorf("option %s must be a boolean, got %q", key, value)
-	}
-}
-
-func parsePositiveInt32Option(options map[string]string, key string) (int32, bool, error) {
-	value, ok := lookupOptionValue(options, key)
-	if !ok {
-		return 0, false, nil
-	}
-
-	parsed, err := strconv.Atoi(normalizeToken(value))
-	if err != nil {
-		return 0, true, fmt.Errorf("option %s must be an integer, got %q", key, value)
-	}
-	if parsed <= 0 {
-		return 0, true, fmt.Errorf("option %s must be greater than zero, got %d", key, parsed)
-	}
-
-	return int32(parsed), true, nil
-}
-
 func lookupOptionValue(options map[string]string, target string) (string, bool) {
 	target = normalizeToken(target)
 	for key, value := range options {
@@ -225,74 +150,6 @@ func resolveDefaultVPCID(ctx context.Context, ec2Client ec2API, region string) (
 	}
 
 	return vpcID, nil
-}
-
-func resolveDefaultSubnetID(
-	ctx context.Context,
-	ec2Client ec2API,
-	region string,
-	vpcID string,
-	availabilityZone string,
-	requireIPv6 bool,
-) (string, error) {
-	filters := []ec2types.Filter{
-		{
-			Name:   awsv2.String("default-for-az"),
-			Values: []string{"true"},
-		},
-		{
-			Name:   awsv2.String("vpc-id"),
-			Values: []string{vpcID},
-		},
-	}
-	if availabilityZone != "" {
-		filters = append(filters, ec2types.Filter{
-			Name:   awsv2.String("availability-zone"),
-			Values: []string{availabilityZone},
-		})
-	}
-
-	output, err := ec2Client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{Filters: filters})
-	if err != nil {
-		return "", fmt.Errorf("describe default subnets in region %s: %w", region, err)
-	}
-	if len(output.Subnets) == 0 {
-		if availabilityZone != "" {
-			return "", fmt.Errorf("no default subnet was found in region %s for availability zone %s", region, availabilityZone)
-		}
-		return "", fmt.Errorf("no default subnet was found in region %s", region)
-	}
-
-	subnets := append([]ec2types.Subnet(nil), output.Subnets...)
-	sort.Slice(subnets, func(i, j int) bool {
-		leftAZ := awsv2.ToString(subnets[i].AvailabilityZone)
-		rightAZ := awsv2.ToString(subnets[j].AvailabilityZone)
-		if leftAZ != rightAZ {
-			return leftAZ < rightAZ
-		}
-		return awsv2.ToString(subnets[i].SubnetId) < awsv2.ToString(subnets[j].SubnetId)
-	})
-
-	for _, subnet := range subnets {
-		if requireIPv6 && !subnetSupportsIPv6(subnet) {
-			continue
-		}
-
-		subnetID := awsv2.ToString(subnet.SubnetId)
-		if subnetID == "" {
-			continue
-		}
-		return subnetID, nil
-	}
-
-	if availabilityZone != "" && requireIPv6 {
-		return "", fmt.Errorf("no default subnet with IPv6 support was found in region %s for availability zone %s", region, availabilityZone)
-	}
-	if requireIPv6 {
-		return "", fmt.Errorf("no default subnet with IPv6 support was found in region %s", region)
-	}
-
-	return "", fmt.Errorf("default subnet lookup in region %s returned only subnets without ids", region)
 }
 
 func resolveDefaultSecurityGroupID(ctx context.Context, ec2Client ec2API, region string, vpcID string) (string, error) {
