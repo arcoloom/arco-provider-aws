@@ -404,6 +404,26 @@ func TestBuildMarketOfferingAttributesNormalizesArchitectures(t *testing.T) {
 	if got, want := attributes["architectures"], "x86,arm64"; got != want {
 		t.Fatalf("attributes[architectures] = %q, want %q", got, want)
 	}
+	if got, want := attributes["cpu_credit_mode"], "standard"; got != want {
+		t.Fatalf("attributes[cpu_credit_mode] = %q, want %q", got, want)
+	}
+}
+
+func TestBuildMarketOfferingAttributesMarksBurstableCPUCredits(t *testing.T) {
+	t.Parallel()
+
+	attributes := buildMarketOfferingAttributes(catalogInstanceMetadataRecord{
+		Raw: map[string]any{
+			"burst_minutes": 144.0,
+		},
+	}, "pricing_api", "0.068", time.Date(2026, 3, 23, 10, 0, 0, 0, time.UTC), provider.SpotInventory{})
+
+	if got, want := attributes["cpu_credit_mode"], "burstable"; got != want {
+		t.Fatalf("attributes[cpu_credit_mode] = %q, want %q", got, want)
+	}
+	if got, want := attributes["cpu_credit_burst_minutes"], "144"; got != want {
+		t.Fatalf("attributes[cpu_credit_burst_minutes] = %q, want %q", got, want)
+	}
 }
 
 func TestNormalizeMarketArchitectures(t *testing.T) {

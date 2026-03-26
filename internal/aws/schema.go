@@ -169,6 +169,13 @@ func awsComputeInstanceSchema() provider.ResourceSchema {
 				Description: "High-level network mode for the primary interface. Supported values: ipv4, ipv6, ipv4+ipv6. More specific network flags override this shorthand when both are set.",
 			},
 			{
+				Name:         "cpu_credit_mode",
+				Type:         provider.SchemaAttributeTypeString,
+				Optional:     true,
+				Description:  "CPU performance model selector for burstable capacity. Supported values: standard, burstable, any. Default keeps offerings that do not rely on CPU credits.",
+				DefaultValue: "standard",
+			},
+			{
 				Name:         "use_default_vpc",
 				Type:         provider.SchemaAttributeTypeBool,
 				Optional:     true,

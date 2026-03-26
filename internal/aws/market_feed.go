@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -364,6 +365,16 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 	}
 	attributes["source"] = source
 	attributes["ipv6_supported"] = strconvBool(record.IPv6Support)
+	if burstMinutes := normalizeBurstMinutes(record.Raw["burst_minutes"]); burstMinutes != "" {
+		attributes["burstable"] = "true"
+		attributes["cpu_credits_supported"] = "true"
+		attributes["cpu_credit_mode"] = "burstable"
+		attributes["cpu_credit_burst_minutes"] = burstMinutes
+	} else {
+		attributes["burstable"] = "false"
+		attributes["cpu_credits_supported"] = "false"
+		attributes["cpu_credit_mode"] = "standard"
+	}
 	if strings.TrimSpace(record.GPUModel) != "" {
 		attributes["gpu_model"] = strings.TrimSpace(record.GPUModel)
 	}
@@ -383,6 +394,29 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 		attributes["capacity_score"] = strconv.FormatInt(int64(inventory.CapacityScore), 10)
 	}
 	return attributes
+}
+
+func normalizeBurstMinutes(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 64)
+	case int:
+		return strconv.Itoa(typed)
+	case int32:
+		return strconv.FormatInt(int64(typed), 10)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case json.Number:
+		return typed.String()
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }
 
 func normalizeMarketArchitectures(values []string) []string {
