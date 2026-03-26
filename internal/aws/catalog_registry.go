@@ -160,9 +160,6 @@ func validateRegistryDatasetResolve(resolved *registryDatasetResolveResponse) er
 	if strings.TrimSpace(resolved.Dataset.Provider) != registryProviderName || strings.TrimSpace(resolved.Dataset.Name) != registryDatasetName {
 		return fmt.Errorf("registry dataset resolve response did not describe %s/%s", registryProviderName, registryDatasetName)
 	}
-	if strings.TrimSpace(resolved.Dataset.Version) == "" {
-		return fmt.Errorf("registry dataset resolve response did not include a version")
-	}
 	for _, alias := range requiredCatalogAliases() {
 		file, ok := resolved.Files[alias]
 		if !ok {
@@ -290,9 +287,6 @@ func writeCatalogResolveCache(path string, resolved *registryDatasetResolveRespo
 
 func registryDatasetVersionMatches(left *registryDatasetResolveResponse, right *registryDatasetResolveResponse) bool {
 	if left == nil || right == nil {
-		return false
-	}
-	if strings.TrimSpace(left.Dataset.Version) != strings.TrimSpace(right.Dataset.Version) {
 		return false
 	}
 	for _, alias := range requiredCatalogAliases() {
