@@ -285,29 +285,6 @@ func buildCatalogSnapshot(
 	}
 }
 
-func (r *catalogRepository) readThroughCache(ctx context.Context, relativePath string, sourceURL string, ttl time.Duration) ([]byte, error) {
-	cachePath := filepath.Join(r.baseDir, relativePath)
-	if info, err := os.Stat(cachePath); err == nil {
-		if r.now().Sub(info.ModTime()) <= ttl {
-			return os.ReadFile(cachePath)
-		}
-	}
-
-	body, fetchErr := r.fetcher.Fetch(ctx, sourceURL)
-	if fetchErr == nil {
-		if err := writeCacheFile(cachePath, body); err != nil {
-			return nil, err
-		}
-		return body, nil
-	}
-
-	if _, err := os.Stat(cachePath); err == nil {
-		return os.ReadFile(cachePath)
-	}
-
-	return nil, fetchErr
-}
-
 func writeCacheFile(path string, body []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create cache dir for %s: %w", path, err)
