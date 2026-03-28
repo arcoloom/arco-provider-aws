@@ -358,7 +358,7 @@ func buildRunInstancesInput(
 		if runConfig.associatePublicIPv4 != nil {
 			networkInterface.AssociatePublicIpAddress = runConfig.associatePublicIPv4
 		}
-		if runConfig.ipv6AddressCount > 0 {
+		if runConfig.hasIPv6AddressCount {
 			networkInterface.Ipv6AddressCount = awsv2.Int32(runConfig.ipv6AddressCount)
 		}
 		if len(runConfig.securityGroupIDs) > 0 {

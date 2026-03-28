@@ -29,6 +29,7 @@ type startInstanceLaunchOptions struct {
 	hasAssociatePublicIPv4  bool
 	associatePublicIPv4     bool
 	assignPublicIPv6        bool
+	hasIPv6AddressCount     bool
 	ipv6AddressCount        int32
 	rootVolumeSizeGiB       int32
 }
@@ -38,6 +39,7 @@ type resolvedRunInstancesConfig struct {
 	securityGroupIDs    []string
 	useNetworkInterface bool
 	associatePublicIPv4 *bool
+	hasIPv6AddressCount bool
 	ipv6AddressCount    int32
 	rootVolumeSizeGiB   int32
 	rootDeviceName      string
@@ -59,12 +61,11 @@ func resolveRunInstancesConfig(
 	}
 
 	options := config.LaunchOptions
-	needsIPv6 := options.ipv6AddressCount > 0
-	needsNetworkInterface := options.hasAssociatePublicIPv4 || needsIPv6
+	needsNetworkInterface := options.hasAssociatePublicIPv4 || options.hasIPv6AddressCount
 	needsManagedNetwork := result.subnetID == "" && (options.useDefaultVPC || options.useDefaultSubnet || needsNetworkInterface || len(result.securityGroupIDs) == 0)
 	sharedNetwork := managedNetwork{}
 	if needsManagedNetwork {
-		sharedNetwork, err = ensureManagedNetwork(ctx, ec2Client, req.Region, req.AvailabilityZone)
+		sharedNetwork, err = ensureManagedNetwork(ctx, ec2Client, req.Region, req.AvailabilityZone, managedSubnetModeForNetworkMode(config.NetworkMode))
 		if err != nil {
 			return resolvedRunInstancesConfig{}, err
 		}
@@ -101,7 +102,18 @@ func resolveRunInstancesConfig(
 		if options.hasAssociatePublicIPv4 {
 			result.associatePublicIPv4 = awsv2.Bool(options.associatePublicIPv4)
 		}
+		result.hasIPv6AddressCount = options.hasIPv6AddressCount
 		result.ipv6AddressCount = options.ipv6AddressCount
+	}
+
+	if config.NetworkMode != "" && result.subnetID != "" {
+		subnet, err := describeSubnetByID(ctx, ec2Client, result.subnetID)
+		if err != nil {
+			return resolvedRunInstancesConfig{}, err
+		}
+		if err := validateSubnetForNetworkMode(subnet, config.NetworkMode); err != nil {
+			return resolvedRunInstancesConfig{}, err
+		}
 	}
 
 	if options.rootVolumeSizeGiB > 0 {
@@ -222,4 +234,39 @@ func subnetSupportsIPv6(subnet ec2types.Subnet) bool {
 	}
 
 	return false
+}
+
+func describeSubnetByID(ctx context.Context, ec2Client ec2API, subnetID string) (ec2types.Subnet, error) {
+	output, err := ec2Client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
+		SubnetIds: []string{subnetID},
+	})
+	if err != nil {
+		return ec2types.Subnet{}, fmt.Errorf("describe subnet %s: %w", subnetID, err)
+	}
+	if len(output.Subnets) == 0 {
+		return ec2types.Subnet{}, fmt.Errorf("subnet %s was not found", subnetID)
+	}
+	return output.Subnets[0], nil
+}
+
+func validateSubnetForNetworkMode(subnet ec2types.Subnet, networkMode string) error {
+	switch networkMode {
+	case providerNetworkModeIPv4:
+		if awsv2.ToBool(subnet.Ipv6Native) {
+			return fmt.Errorf("subnet %s is IPv6-only and cannot satisfy provider_config.%s=%s", awsv2.ToString(subnet.SubnetId), providerConfigNetworkMode, providerNetworkModeIPv4)
+		}
+	case providerNetworkModeIPv6:
+		if !awsv2.ToBool(subnet.Ipv6Native) {
+			return fmt.Errorf("subnet %s is not IPv6-only; provider_config.%s=%s requires an IPv6-native subnet", awsv2.ToString(subnet.SubnetId), providerConfigNetworkMode, providerNetworkModeIPv6)
+		}
+	case providerNetworkModeDualStack:
+		if awsv2.ToBool(subnet.Ipv6Native) {
+			return fmt.Errorf("subnet %s is IPv6-only and cannot satisfy provider_config.%s=%s", awsv2.ToString(subnet.SubnetId), providerConfigNetworkMode, providerNetworkModeDualStack)
+		}
+		if !subnetSupportsIPv6(subnet) {
+			return fmt.Errorf("subnet %s does not have an associated IPv6 CIDR block; provider_config.%s=%s requires dual-stack subnet placement", awsv2.ToString(subnet.SubnetId), providerConfigNetworkMode, providerNetworkModeDualStack)
+		}
+	}
+
+	return nil
 }

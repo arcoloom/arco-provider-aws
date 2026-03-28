@@ -491,8 +491,7 @@ func TestStartInstanceResolvesDefaultNetworkAndRootVolumeFromOptions(t *testing.
 					{
 						SubnetId:                    awsv2.String("subnet-ipv6"),
 						AvailabilityZone:            awsv2.String("us-east-1b"),
-						CidrBlock:                   awsv2.String("10.77.0.0/24"),
-						MapPublicIpOnLaunch:         awsv2.Bool(true),
+						Ipv6Native:                  awsv2.Bool(true),
 						AssignIpv6AddressOnCreation: awsv2.Bool(true),
 						Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
 							{
@@ -776,8 +775,8 @@ func TestStartInstanceCreatesManagedNetworkWhenMissing(t *testing.T) {
 	if got := len(ec2Client.modifyVpcAttributeInputs); got != 2 {
 		t.Fatalf("expected dns support and hostnames to be enabled on the managed vpc, got %d calls", got)
 	}
-	if got := len(ec2Client.modifySubnetAttributeInputs); got != 2 {
-		t.Fatalf("expected public ipv4 and ipv6 auto-assignment to be enabled on the managed subnet, got %d calls", got)
+	if got := len(ec2Client.modifySubnetAttributeInputs); got != 1 {
+		t.Fatalf("expected only public ipv4 mapping on the managed subnet, got %d calls", got)
 	}
 	if ec2Client.runInstancesInput == nil {
 		t.Fatal("expected RunInstances to be called")
@@ -790,6 +789,285 @@ func TestStartInstanceCreatesManagedNetworkWhenMissing(t *testing.T) {
 	}
 	if ec2Client.runInstancesInput.Placement == nil || awsv2.ToString(ec2Client.runInstancesInput.Placement.AvailabilityZone) != "us-west-1d" {
 		t.Fatalf("unexpected instance placement: %+v", ec2Client.runInstancesInput.Placement)
+	}
+}
+
+func TestStartInstanceIPv4ModeExplicitlySuppressesIPv6OnPrimaryInterface(t *testing.T) {
+	ec2Client := &recordingEC2Client{
+		fakeEC2Client: fakeEC2Client{
+			subnetsOutput: &ec2.DescribeSubnetsOutput{
+				Subnets: []ec2types.Subnet{
+					{
+						SubnetId:                    awsv2.String("subnet-dual"),
+						AvailabilityZone:            awsv2.String("us-west-2a"),
+						CidrBlock:                   awsv2.String("10.0.0.0/24"),
+						AssignIpv6AddressOnCreation: awsv2.Bool(true),
+						Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
+							{
+								Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/64"),
+								Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
+									State: ec2types.SubnetCidrBlockStateCodeAssociated,
+								},
+							},
+						},
+					},
+				},
+			},
+			imagesOutput: &ec2.DescribeImagesOutput{
+				Images: []ec2types.Image{
+					{RootDeviceName: awsv2.String("/dev/xvda")},
+				},
+			},
+		},
+		describeInstanceTypesOutput: &ec2.DescribeInstanceTypesOutput{
+			InstanceTypes: []ec2types.InstanceTypeInfo{
+				{
+					ProcessorInfo: &ec2types.ProcessorInfo{
+						SupportedArchitectures: []ec2types.ArchitectureType{ec2types.ArchitectureTypeX8664},
+					},
+				},
+			},
+		},
+		runInstancesOutput: &ec2.RunInstancesOutput{
+			Instances: []ec2types.Instance{
+				{InstanceId: awsv2.String("i-ipv4")},
+			},
+		},
+	}
+	ssmClient := &recordingSSMClient{
+		pathOutput: &ssm.GetParametersByPathOutput{
+			Parameters: []ssmtypes.Parameter{
+				{
+					Name:  awsv2.String("/aws/service/debian/release/13/latest/amd64/ami-id"),
+					Value: awsv2.String("ami-ipv4"),
+				},
+			},
+		},
+	}
+	factory := instanceTestClientFactory{
+		ec2Client: ec2Client,
+		ssmClient: ssmClient,
+	}
+	service := &Service{
+		version:        "test",
+		clientFactory:  factory,
+		instanceRunner: newInstanceLifecycleRunner(factory),
+	}
+
+	_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
+		Region:       "us-west-2",
+		StackName:    "stack-ipv4",
+		InstanceType: "m7i.large",
+		ProviderConfig: map[string]any{
+			providerConfigNetworkMode:      providerNetworkModeIPv4,
+			providerConfigSubnetID:         "subnet-dual",
+			providerConfigSecurityGroupIDs: []any{"sg-123"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartInstance returned error: %v", err)
+	}
+
+	if ec2Client.runInstancesInput == nil || len(ec2Client.runInstancesInput.NetworkInterfaces) != 1 {
+		t.Fatalf("expected a single network interface, got %+v", ec2Client.runInstancesInput)
+	}
+	networkInterface := ec2Client.runInstancesInput.NetworkInterfaces[0]
+	if networkInterface.Ipv6AddressCount == nil {
+		t.Fatalf("expected ipv4 mode to send an explicit ipv6 address count override, got %+v", networkInterface)
+	}
+	if got := awsv2.ToInt32(networkInterface.Ipv6AddressCount); got != 0 {
+		t.Fatalf("expected ipv4 mode to force ipv6_address_count=0, got %d", got)
+	}
+	if got := awsv2.ToBool(networkInterface.AssociatePublicIpAddress); !got {
+		t.Fatalf("expected ipv4 mode to keep public ipv4 enabled by default, got %+v", networkInterface.AssociatePublicIpAddress)
+	}
+}
+
+func TestStartInstanceIPv6ModeCreatesIPv6NativeManagedSubnet(t *testing.T) {
+	ec2Client := &recordingEC2Client{
+		describeSubnetsOutputs: []*ec2.DescribeSubnetsOutput{
+			&ec2.DescribeSubnetsOutput{},
+			&ec2.DescribeSubnetsOutput{
+				Subnets: []ec2types.Subnet{
+					{
+						SubnetId:                    awsv2.String("subnet-v6"),
+						AvailabilityZone:            awsv2.String("us-west-2a"),
+						Ipv6Native:                  awsv2.Bool(true),
+						AssignIpv6AddressOnCreation: awsv2.Bool(true),
+						PrivateDnsNameOptionsOnLaunch: &ec2types.PrivateDnsNameOptionsOnLaunch{
+							EnableResourceNameDnsAAAARecord: awsv2.Bool(true),
+							EnableResourceNameDnsARecord:    awsv2.Bool(false),
+							HostnameType:                    ec2types.HostnameTypeResourceName,
+						},
+						Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
+							{
+								Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/64"),
+								Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
+									State: ec2types.SubnetCidrBlockStateCodeAssociated,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		fakeEC2Client: fakeEC2Client{
+			vpcsOutput: &ec2.DescribeVpcsOutput{
+				Vpcs: []ec2types.Vpc{
+					{
+						VpcId: awsv2.String("vpc-arco"),
+						Ipv6CidrBlockAssociationSet: []ec2types.VpcIpv6CidrBlockAssociation{
+							{
+								Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/56"),
+								Ipv6CidrBlockState: &ec2types.VpcCidrBlockState{
+									State: ec2types.VpcCidrBlockStateCodeAssociated,
+								},
+							},
+						},
+					},
+				},
+			},
+			internetGatewaysOutput: &ec2.DescribeInternetGatewaysOutput{
+				InternetGateways: []ec2types.InternetGateway{
+					{
+						InternetGatewayId: awsv2.String("igw-arco"),
+						Attachments: []ec2types.InternetGatewayAttachment{
+							{
+								VpcId: awsv2.String("vpc-arco"),
+								State: ec2types.AttachmentStatusAttached,
+							},
+						},
+					},
+				},
+			},
+			routeTablesOutput: &ec2.DescribeRouteTablesOutput{
+				RouteTables: []ec2types.RouteTable{
+					{
+						RouteTableId: awsv2.String("rtb-arco"),
+						Routes: []ec2types.Route{
+							{
+								DestinationCidrBlock: awsv2.String("0.0.0.0/0"),
+								GatewayId:            awsv2.String("igw-arco"),
+							},
+							{
+								DestinationIpv6CidrBlock: awsv2.String("::/0"),
+								GatewayId:                awsv2.String("igw-arco"),
+							},
+						},
+					},
+				},
+			},
+			subnetsOutput: &ec2.DescribeSubnetsOutput{},
+			securityGroupsOutput: &ec2.DescribeSecurityGroupsOutput{
+				SecurityGroups: []ec2types.SecurityGroup{
+					{GroupId: awsv2.String("sg-arco")},
+				},
+			},
+			imagesOutput: &ec2.DescribeImagesOutput{
+				Images: []ec2types.Image{
+					{RootDeviceName: awsv2.String("/dev/xvda")},
+				},
+			},
+		},
+		createSubnetOutput: &ec2.CreateSubnetOutput{
+			Subnet: &ec2types.Subnet{
+				SubnetId:                    awsv2.String("subnet-v6"),
+				AvailabilityZone:            awsv2.String("us-west-2a"),
+				Ipv6Native:                  awsv2.Bool(true),
+				AssignIpv6AddressOnCreation: awsv2.Bool(true),
+				PrivateDnsNameOptionsOnLaunch: &ec2types.PrivateDnsNameOptionsOnLaunch{
+					EnableResourceNameDnsAAAARecord: awsv2.Bool(true),
+					EnableResourceNameDnsARecord:    awsv2.Bool(false),
+					HostnameType:                    ec2types.HostnameTypeResourceName,
+				},
+				Ipv6CidrBlockAssociationSet: []ec2types.SubnetIpv6CidrBlockAssociation{
+					{
+						Ipv6CidrBlock: awsv2.String("2600:1f14:abcd:ef00::/64"),
+						Ipv6CidrBlockState: &ec2types.SubnetCidrBlockState{
+							State: ec2types.SubnetCidrBlockStateCodeAssociated,
+						},
+					},
+				},
+			},
+		},
+		describeInstanceTypesOutput: &ec2.DescribeInstanceTypesOutput{
+			InstanceTypes: []ec2types.InstanceTypeInfo{
+				{
+					ProcessorInfo: &ec2types.ProcessorInfo{
+						SupportedArchitectures: []ec2types.ArchitectureType{ec2types.ArchitectureTypeX8664},
+					},
+				},
+			},
+		},
+		runInstancesOutput: &ec2.RunInstancesOutput{
+			Instances: []ec2types.Instance{
+				{InstanceId: awsv2.String("i-v6")},
+			},
+		},
+	}
+	ssmClient := &recordingSSMClient{
+		pathOutput: &ssm.GetParametersByPathOutput{
+			Parameters: []ssmtypes.Parameter{
+				{
+					Name:  awsv2.String("/aws/service/debian/release/13/latest/amd64/ami-id"),
+					Value: awsv2.String("ami-v6"),
+				},
+			},
+		},
+	}
+	factory := instanceTestClientFactory{
+		ec2Client: ec2Client,
+		ssmClient: ssmClient,
+	}
+	service := &Service{
+		version:        "test",
+		clientFactory:  factory,
+		instanceRunner: newInstanceLifecycleRunner(factory),
+	}
+
+	_, err := service.StartInstance(context.Background(), provider.StartInstanceRequest{
+		Credentials: provider.Credentials{
+			AWS: &provider.AWSCredentials{
+				AccessKeyID:     "ak",
+				SecretAccessKey: "sk",
+			},
+		},
+		Region:           "us-west-2",
+		AvailabilityZone: "us-west-2a",
+		StackName:        "stack-v6-managed",
+		InstanceType:     "m7i.large",
+		ProviderConfig: map[string]any{
+			providerConfigNetworkMode: providerNetworkModeIPv6,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartInstance returned error: %v", err)
+	}
+
+	if ec2Client.createSubnetInput == nil {
+		t.Fatal("expected ipv6-only managed subnet to be created")
+	}
+	if ec2Client.createSubnetInput.Ipv6Native == nil || !awsv2.ToBool(ec2Client.createSubnetInput.Ipv6Native) {
+		t.Fatalf("expected managed subnet to be created as ipv6-native, got %+v", ec2Client.createSubnetInput)
+	}
+	if ec2Client.createSubnetInput.CidrBlock != nil {
+		t.Fatalf("expected ipv6-only managed subnet to omit ipv4 cidr, got %+v", ec2Client.createSubnetInput.CidrBlock)
+	}
+	if ec2Client.runInstancesInput == nil || len(ec2Client.runInstancesInput.NetworkInterfaces) != 1 {
+		t.Fatalf("expected a single network interface launch, got %+v", ec2Client.runInstancesInput)
+	}
+	networkInterface := ec2Client.runInstancesInput.NetworkInterfaces[0]
+	if got := awsv2.ToBool(networkInterface.AssociatePublicIpAddress); got {
+		t.Fatalf("expected ipv6-only mode to disable public ipv4 association, got %+v", networkInterface.AssociatePublicIpAddress)
+	}
+	if got := awsv2.ToInt32(networkInterface.Ipv6AddressCount); got != 1 {
+		t.Fatalf("expected ipv6-only mode to request one ipv6 address, got %d", got)
 	}
 }
 
@@ -973,6 +1251,7 @@ func TestEnsureManagedSubnetReadyWaitsForAssociatedCIDRBeforeIPv6AutoAssign(t *t
 			},
 		},
 		nil,
+		managedSubnetModeDualStack,
 	)
 	if err != nil {
 		t.Fatalf("ensureManagedSubnetReady() error = %v", err)
@@ -983,8 +1262,8 @@ func TestEnsureManagedSubnetReadyWaitsForAssociatedCIDRBeforeIPv6AutoAssign(t *t
 	if !subnetSupportsIPv6(subnet) {
 		t.Fatalf("expected subnet to report ipv6 support after wait, got %+v", subnet.Ipv6CidrBlockAssociationSet)
 	}
-	if got := len(ec2Client.modifySubnetAttributeInputs); got != 2 {
-		t.Fatalf("expected subnet attribute updates after ipv6 association completed, got %d", got)
+	if got := len(ec2Client.modifySubnetAttributeInputs); got != 1 {
+		t.Fatalf("expected only public ipv4 mapping update after ipv6 association completed, got %d", got)
 	}
 }
 

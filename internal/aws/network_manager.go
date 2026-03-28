@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,8 @@ const (
 	managedNetworkTagKeyKind          = "ArcoResourceKind"
 	managedNetworkTagKeyRegion        = "ArcoRegion"
 	managedNetworkTagKeyAZ            = "ArcoAvailabilityZone"
+	managedNetworkTagKeySubnetMode    = "ArcoSubnetMode"
+	managedNetworkTagKeySubnetIndex   = "ArcoSubnetIndex"
 	managedNetworkTagValueShared      = "true"
 	managedNetworkKindVPC             = "shared-vpc"
 	managedNetworkKindSubnet          = "shared-subnet"
@@ -43,11 +46,19 @@ type managedNetwork struct {
 	securityGroupID string
 }
 
+type managedSubnetMode string
+
+const (
+	managedSubnetModeDualStack managedSubnetMode = "dualstack"
+	managedSubnetModeIPv6Only  managedSubnetMode = "ipv6-native"
+)
+
 func ensureManagedNetwork(
 	ctx context.Context,
 	ec2Client ec2API,
 	region string,
 	availabilityZone string,
+	subnetMode managedSubnetMode,
 ) (managedNetwork, error) {
 	vpc, err := ensureManagedVPC(ctx, ec2Client, region)
 	if err != nil {
@@ -64,7 +75,7 @@ func ensureManagedNetwork(
 		return managedNetwork{}, err
 	}
 
-	subnet, err := ensureManagedSubnet(ctx, ec2Client, region, vpc, routeTable, availabilityZone)
+	subnet, err := ensureManagedSubnet(ctx, ec2Client, region, vpc, routeTable, availabilityZone, subnetMode)
 	if err != nil {
 		return managedNetwork{}, err
 	}
@@ -325,49 +336,67 @@ func ensureManagedSubnet(
 	vpc ec2types.Vpc,
 	routeTable ec2types.RouteTable,
 	availabilityZone string,
+	subnetMode managedSubnetMode,
 ) (ec2types.Subnet, error) {
-	subnets, err := listManagedSubnets(ctx, ec2Client, awsv2.ToString(vpc.VpcId))
+	allSubnets, err := listManagedSubnets(ctx, ec2Client, awsv2.ToString(vpc.VpcId))
 	if err != nil {
 		return ec2types.Subnet{}, err
 	}
+	subnets := filterManagedSubnetsByMode(allSubnets, subnetMode)
 
 	selectedAZ := strings.TrimSpace(availabilityZone)
 	if selectedAZ == "" {
 		if subnet, ok := firstManagedSubnet(subnets, ""); ok {
-			return ensureManagedSubnetReady(ctx, ec2Client, region, vpc, routeTable, subnet, subnets)
+			return ensureManagedSubnetReady(ctx, ec2Client, region, vpc, routeTable, subnet, allSubnets, subnetMode)
 		}
 		selectedAZ, err = chooseManagedSubnetAZ(ctx, ec2Client, region)
 		if err != nil {
 			return ec2types.Subnet{}, err
 		}
 	} else if subnet, ok := firstManagedSubnet(subnets, selectedAZ); ok {
-		return ensureManagedSubnetReady(ctx, ec2Client, region, vpc, routeTable, subnet, subnets)
+		return ensureManagedSubnetReady(ctx, ec2Client, region, vpc, routeTable, subnet, allSubnets, subnetMode)
 	}
 
-	index, err := firstAvailableManagedSubnetIndex(subnets)
+	index, err := firstAvailableManagedSubnetIndex(allSubnets)
 	if err != nil {
 		return ec2types.Subnet{}, err
 	}
 
-	ipv4CIDR, err := managedSubnetIPv4CIDR(index)
-	if err != nil {
-		return ec2types.Subnet{}, err
-	}
 	ipv6CIDR, err := managedSubnetIPv6CIDR(managedVPCIPv6CIDR(vpc), index)
 	if err != nil {
 		return ec2types.Subnet{}, err
 	}
 
-	createOutput, err := ec2Client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
+	createInput := &ec2.CreateSubnetInput{
 		VpcId:            awsv2.String(awsv2.ToString(vpc.VpcId)),
 		AvailabilityZone: awsv2.String(selectedAZ),
-		CidrBlock:        awsv2.String(ipv4CIDR),
 		Ipv6CidrBlock:    awsv2.String(ipv6CIDR),
 		TagSpecifications: managedTagSpecifications(
 			ec2types.ResourceTypeSubnet,
-			managedTags(managedNetworkSubnetName, managedNetworkKindSubnet, region, selectedAZ),
+			managedTagsWithExtras(
+				managedNetworkSubnetName,
+				managedNetworkKindSubnet,
+				region,
+				selectedAZ,
+				map[string]string{
+					managedNetworkTagKeySubnetMode:  string(subnetMode),
+					managedNetworkTagKeySubnetIndex: fmt.Sprintf("%d", index),
+				},
+			),
 		),
-	})
+	}
+	switch subnetMode {
+	case managedSubnetModeIPv6Only:
+		createInput.Ipv6Native = awsv2.Bool(true)
+	default:
+		ipv4CIDR, err := managedSubnetIPv4CIDR(index)
+		if err != nil {
+			return ec2types.Subnet{}, err
+		}
+		createInput.CidrBlock = awsv2.String(ipv4CIDR)
+	}
+
+	createOutput, err := ec2Client.CreateSubnet(ctx, createInput)
 	if err != nil {
 		return ec2types.Subnet{}, fmt.Errorf("create managed subnet in az %s for region %s: %w", selectedAZ, region, err)
 	}
@@ -375,7 +404,7 @@ func ensureManagedSubnet(
 		return ec2types.Subnet{}, fmt.Errorf("create managed subnet in az %s for region %s returned an empty subnet id", selectedAZ, region)
 	}
 
-	return ensureManagedSubnetReady(ctx, ec2Client, region, vpc, routeTable, *createOutput.Subnet, subnets)
+	return ensureManagedSubnetReady(ctx, ec2Client, region, vpc, routeTable, *createOutput.Subnet, allSubnets, subnetMode)
 }
 
 func listManagedSubnets(ctx context.Context, ec2Client ec2API, vpcID string) ([]ec2types.Subnet, error) {
@@ -456,59 +485,60 @@ func ensureManagedSubnetReady(
 	routeTable ec2types.RouteTable,
 	subnet ec2types.Subnet,
 	allManagedSubnets []ec2types.Subnet,
+	subnetMode managedSubnetMode,
 ) (ec2types.Subnet, error) {
 	subnetID := awsv2.ToString(subnet.SubnetId)
 	if subnetID == "" {
 		return ec2types.Subnet{}, fmt.Errorf("managed subnet in region %s returned an empty subnet id", region)
 	}
 
-	if !subnetSupportsIPv6(subnet) {
-		if !subnetHasAnyIPv6CIDR(subnet) {
-			index, err := managedSubnetIndex(subnet)
-			if err != nil {
-				return ec2types.Subnet{}, err
-			}
-			ipv6CIDR, err := managedSubnetIPv6CIDR(managedVPCIPv6CIDR(vpc), index)
-			if err != nil {
-				return ec2types.Subnet{}, err
-			}
-			output, err := ec2Client.AssociateSubnetCidrBlock(ctx, &ec2.AssociateSubnetCidrBlockInput{
-				SubnetId:      awsv2.String(subnetID),
-				Ipv6CidrBlock: awsv2.String(ipv6CIDR),
-			})
-			if err != nil {
-				return ec2types.Subnet{}, fmt.Errorf("associate ipv6 cidr with subnet %s in region %s: %w", subnetID, region, err)
-			}
-			if output.Ipv6CidrBlockAssociation != nil {
-				subnet.Ipv6CidrBlockAssociationSet = append(subnet.Ipv6CidrBlockAssociationSet, *output.Ipv6CidrBlockAssociation)
-			}
+	switch subnetMode {
+	case managedSubnetModeIPv6Only:
+		if !awsv2.ToBool(subnet.Ipv6Native) {
+			return ec2types.Subnet{}, fmt.Errorf("managed subnet %s in region %s is not IPv6-native", subnetID, region)
 		}
+	default:
+		if awsv2.ToBool(subnet.Ipv6Native) {
+			return ec2types.Subnet{}, fmt.Errorf("managed subnet %s in region %s is IPv6-only and cannot satisfy dual-stack placement", subnetID, region)
+		}
+		if !subnetSupportsIPv6(subnet) {
+			if !subnetHasAnyIPv6CIDR(subnet) {
+				index, err := managedSubnetIndex(subnet)
+				if err != nil {
+					return ec2types.Subnet{}, err
+				}
+				ipv6CIDR, err := managedSubnetIPv6CIDR(managedVPCIPv6CIDR(vpc), index)
+				if err != nil {
+					return ec2types.Subnet{}, err
+				}
+				output, err := ec2Client.AssociateSubnetCidrBlock(ctx, &ec2.AssociateSubnetCidrBlockInput{
+					SubnetId:      awsv2.String(subnetID),
+					Ipv6CidrBlock: awsv2.String(ipv6CIDR),
+				})
+				if err != nil {
+					return ec2types.Subnet{}, fmt.Errorf("associate ipv6 cidr with subnet %s in region %s: %w", subnetID, region, err)
+				}
+				if output.Ipv6CidrBlockAssociation != nil {
+					subnet.Ipv6CidrBlockAssociationSet = append(subnet.Ipv6CidrBlockAssociationSet, *output.Ipv6CidrBlockAssociation)
+				}
+			}
 
-		refreshedSubnet, err := waitForManagedSubnetIPv6CIDR(ctx, ec2Client, region, subnetID)
-		if err != nil {
+			refreshedSubnet, err := waitForManagedSubnetIPv6CIDR(ctx, ec2Client, region, subnetID)
+			if err != nil {
+				return ec2types.Subnet{}, err
+			}
+			subnet = refreshedSubnet
+		}
+	}
+
+	switch subnetMode {
+	case managedSubnetModeIPv6Only:
+		if err := ensureManagedIPv6OnlySubnetAttributes(ctx, ec2Client, region, subnet); err != nil {
 			return ec2types.Subnet{}, err
 		}
-		subnet = refreshedSubnet
-	}
-
-	if !awsv2.ToBool(subnet.MapPublicIpOnLaunch) {
-		if _, err := ec2Client.ModifySubnetAttribute(ctx, &ec2.ModifySubnetAttributeInput{
-			SubnetId: awsv2.String(subnetID),
-			MapPublicIpOnLaunch: &ec2types.AttributeBooleanValue{
-				Value: awsv2.Bool(true),
-			},
-		}); err != nil {
-			return ec2types.Subnet{}, fmt.Errorf("enable public ipv4 mapping on subnet %s in region %s: %w", subnetID, region, err)
-		}
-	}
-	if !awsv2.ToBool(subnet.AssignIpv6AddressOnCreation) {
-		if _, err := ec2Client.ModifySubnetAttribute(ctx, &ec2.ModifySubnetAttributeInput{
-			SubnetId: awsv2.String(subnetID),
-			AssignIpv6AddressOnCreation: &ec2types.AttributeBooleanValue{
-				Value: awsv2.Bool(true),
-			},
-		}); err != nil {
-			return ec2types.Subnet{}, fmt.Errorf("enable ipv6 auto-assignment on subnet %s in region %s: %w", subnetID, region, err)
+	default:
+		if err := ensureManagedDualStackSubnetAttributes(ctx, ec2Client, region, subnet); err != nil {
+			return ec2types.Subnet{}, err
 		}
 	}
 
@@ -527,6 +557,107 @@ func ensureManagedSubnetReady(
 		}
 	}
 	return subnet, nil
+}
+
+func filterManagedSubnetsByMode(subnets []ec2types.Subnet, subnetMode managedSubnetMode) []ec2types.Subnet {
+	filtered := make([]ec2types.Subnet, 0, len(subnets))
+	for _, subnet := range subnets {
+		if managedSubnetModeForSubnet(subnet) == subnetMode {
+			filtered = append(filtered, subnet)
+		}
+	}
+	return filtered
+}
+
+func managedSubnetModeForNetworkMode(networkMode string) managedSubnetMode {
+	if networkMode == providerNetworkModeIPv6 {
+		return managedSubnetModeIPv6Only
+	}
+	return managedSubnetModeDualStack
+}
+
+func managedSubnetModeForSubnet(subnet ec2types.Subnet) managedSubnetMode {
+	for _, tag := range subnet.Tags {
+		key := strings.TrimSpace(awsv2.ToString(tag.Key))
+		if key != managedNetworkTagKeySubnetMode {
+			continue
+		}
+		switch normalizeToken(awsv2.ToString(tag.Value)) {
+		case normalizeToken(string(managedSubnetModeIPv6Only)):
+			return managedSubnetModeIPv6Only
+		case normalizeToken(string(managedSubnetModeDualStack)):
+			return managedSubnetModeDualStack
+		}
+	}
+	if awsv2.ToBool(subnet.Ipv6Native) {
+		return managedSubnetModeIPv6Only
+	}
+	return managedSubnetModeDualStack
+}
+
+func ensureManagedDualStackSubnetAttributes(ctx context.Context, ec2Client ec2API, region string, subnet ec2types.Subnet) error {
+	subnetID := awsv2.ToString(subnet.SubnetId)
+	if !awsv2.ToBool(subnet.MapPublicIpOnLaunch) {
+		if _, err := ec2Client.ModifySubnetAttribute(ctx, &ec2.ModifySubnetAttributeInput{
+			SubnetId: awsv2.String(subnetID),
+			MapPublicIpOnLaunch: &ec2types.AttributeBooleanValue{
+				Value: awsv2.Bool(true),
+			},
+		}); err != nil {
+			return fmt.Errorf("enable public ipv4 mapping on subnet %s in region %s: %w", subnetID, region, err)
+		}
+	}
+	if awsv2.ToBool(subnet.AssignIpv6AddressOnCreation) {
+		if _, err := ec2Client.ModifySubnetAttribute(ctx, &ec2.ModifySubnetAttributeInput{
+			SubnetId: awsv2.String(subnetID),
+			AssignIpv6AddressOnCreation: &ec2types.AttributeBooleanValue{
+				Value: awsv2.Bool(false),
+			},
+		}); err != nil {
+			return fmt.Errorf("disable ipv6 auto-assignment on subnet %s in region %s: %w", subnetID, region, err)
+		}
+	}
+	return nil
+}
+
+func ensureManagedIPv6OnlySubnetAttributes(ctx context.Context, ec2Client ec2API, region string, subnet ec2types.Subnet) error {
+	subnetID := awsv2.ToString(subnet.SubnetId)
+	if !awsv2.ToBool(subnet.AssignIpv6AddressOnCreation) {
+		if _, err := ec2Client.ModifySubnetAttribute(ctx, &ec2.ModifySubnetAttributeInput{
+			SubnetId: awsv2.String(subnetID),
+			AssignIpv6AddressOnCreation: &ec2types.AttributeBooleanValue{
+				Value: awsv2.Bool(true),
+			},
+		}); err != nil {
+			return fmt.Errorf("enable ipv6 auto-assignment on subnet %s in region %s: %w", subnetID, region, err)
+		}
+	}
+
+	options := subnet.PrivateDnsNameOptionsOnLaunch
+	enableAAAA := options == nil || !awsv2.ToBool(options.EnableResourceNameDnsAAAARecord)
+	enableA := options != nil && awsv2.ToBool(options.EnableResourceNameDnsARecord)
+	hostnameType := ec2types.HostnameType("")
+	if options != nil {
+		hostnameType = options.HostnameType
+	}
+
+	if hostnameType != ec2types.HostnameTypeResourceName || enableAAAA || enableA {
+		input := &ec2.ModifySubnetAttributeInput{
+			SubnetId: awsv2.String(subnetID),
+			EnableResourceNameDnsAAAARecordOnLaunch: &ec2types.AttributeBooleanValue{
+				Value: awsv2.Bool(true),
+			},
+			EnableResourceNameDnsARecordOnLaunch: &ec2types.AttributeBooleanValue{
+				Value: awsv2.Bool(false),
+			},
+			PrivateDnsHostnameTypeOnLaunch: ec2types.HostnameTypeResourceName,
+		}
+		if _, err := ec2Client.ModifySubnetAttribute(ctx, input); err != nil {
+			return fmt.Errorf("configure ipv6-only dns attributes on subnet %s in region %s: %w", subnetID, region, err)
+		}
+	}
+
+	return nil
 }
 
 func ensureManagedSecurityGroup(ctx context.Context, ec2Client ec2API, region string, vpcID string) (ec2types.SecurityGroup, error) {
@@ -759,6 +890,17 @@ func firstAvailableManagedSubnetIndex(subnets []ec2types.Subnet) (int, error) {
 }
 
 func managedSubnetIndex(subnet ec2types.Subnet) (int, error) {
+	if taggedIndex, ok := subnetTagValue(subnet, managedNetworkTagKeySubnetIndex); ok {
+		index, err := strconv.Atoi(strings.TrimSpace(taggedIndex))
+		if err != nil {
+			return 0, fmt.Errorf("parse managed subnet index tag %q on subnet %s: %w", taggedIndex, awsv2.ToString(subnet.SubnetId), err)
+		}
+		if index < 0 || index > 255 {
+			return 0, fmt.Errorf("managed subnet index tag %d on subnet %s is outside the supported range", index, awsv2.ToString(subnet.SubnetId))
+		}
+		return index, nil
+	}
+
 	cidr := strings.TrimSpace(awsv2.ToString(subnet.CidrBlock))
 	prefix, err := netip.ParsePrefix(cidr)
 	if err != nil {
@@ -869,6 +1011,10 @@ func securityGroupAllowsAllIPv6Egress(securityGroup ec2types.SecurityGroup) bool
 }
 
 func managedTags(name string, kind string, region string, availabilityZone string) []ec2types.Tag {
+	return managedTagsWithExtras(name, kind, region, availabilityZone, nil)
+}
+
+func managedTagsWithExtras(name string, kind string, region string, availabilityZone string, extras map[string]string) []ec2types.Tag {
 	tagMap := map[string]string{
 		"Name":                     name,
 		"ManagedBy":                managedNetworkManagedByTagValue,
@@ -880,6 +1026,12 @@ func managedTags(name string, kind string, region string, availabilityZone strin
 	}
 	if availabilityZone != "" {
 		tagMap[managedNetworkTagKeyAZ] = availabilityZone
+	}
+	for key, value := range extras {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		tagMap[key] = value
 	}
 
 	keys := make([]string, 0, len(tagMap))
@@ -896,6 +1048,20 @@ func managedTags(name string, kind string, region string, availabilityZone strin
 		})
 	}
 	return tags
+}
+
+func subnetTagValue(subnet ec2types.Subnet, key string) (string, bool) {
+	for _, tag := range subnet.Tags {
+		if strings.TrimSpace(awsv2.ToString(tag.Key)) != key {
+			continue
+		}
+		value := strings.TrimSpace(awsv2.ToString(tag.Value))
+		if value == "" {
+			return "", false
+		}
+		return value, true
+	}
+	return "", false
 }
 
 func managedTagSpecifications(resourceType ec2types.ResourceType, tags []ec2types.Tag) []ec2types.TagSpecification {

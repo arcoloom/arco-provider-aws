@@ -88,7 +88,6 @@ func parseStartInstanceLaunchProviderConfig(config map[string]any, networkMode s
 	var (
 		err                 error
 		hasAssignPublicIPv6 bool
-		hasIPv6AddressCount bool
 	)
 
 	if result.useDefaultVPC, _, err = parseBoolProviderConfig(config, optionUseDefaultVPC); err != nil {
@@ -106,7 +105,7 @@ func parseStartInstanceLaunchProviderConfig(config map[string]any, networkMode s
 	if result.assignPublicIPv6, hasAssignPublicIPv6, err = parseBoolProviderConfig(config, optionAssignPublicIPv6); err != nil {
 		return startInstanceLaunchOptions{}, err
 	}
-	if result.ipv6AddressCount, hasIPv6AddressCount, err = parsePositiveInt32ProviderConfig(config, optionIPv6AddressCount); err != nil {
+	if result.ipv6AddressCount, result.hasIPv6AddressCount, err = parseNonNegativeInt32ProviderConfig(config, optionIPv6AddressCount); err != nil {
 		return startInstanceLaunchOptions{}, err
 	}
 	if result.rootVolumeSizeGiB, _, err = parsePositiveInt32ProviderConfig(config, optionRootVolumeSizeGiB); err != nil {
@@ -125,21 +124,15 @@ func parseStartInstanceLaunchProviderConfig(config map[string]any, networkMode s
 			result.associatePublicIPv4 = true
 			result.hasAssociatePublicIPv4 = true
 		}
-		if !hasAssignPublicIPv6 {
-			result.assignPublicIPv6 = false
-		}
-		if !hasIPv6AddressCount {
-			result.ipv6AddressCount = 0
-		}
+		result.assignPublicIPv6 = false
+		result.hasIPv6AddressCount = true
+		result.ipv6AddressCount = 0
 	case providerNetworkModeIPv6:
-		if !result.hasAssociatePublicIPv4 {
-			result.associatePublicIPv4 = false
-			result.hasAssociatePublicIPv4 = true
-		}
-		if !hasAssignPublicIPv6 {
-			result.assignPublicIPv6 = true
-		}
-		if !hasIPv6AddressCount && result.ipv6AddressCount == 0 {
+		result.associatePublicIPv4 = false
+		result.hasAssociatePublicIPv4 = true
+		result.assignPublicIPv6 = true
+		result.hasIPv6AddressCount = true
+		if result.ipv6AddressCount == 0 {
 			result.ipv6AddressCount = 1
 		}
 	case providerNetworkModeDualStack:
@@ -147,15 +140,18 @@ func parseStartInstanceLaunchProviderConfig(config map[string]any, networkMode s
 			result.associatePublicIPv4 = true
 			result.hasAssociatePublicIPv4 = true
 		}
-		if !hasAssignPublicIPv6 {
-			result.assignPublicIPv6 = true
-		}
-		if !hasIPv6AddressCount && result.ipv6AddressCount == 0 {
+		result.assignPublicIPv6 = true
+		result.hasIPv6AddressCount = true
+		if result.ipv6AddressCount == 0 {
 			result.ipv6AddressCount = 1
 		}
 	}
 	if result.assignPublicIPv6 && result.ipv6AddressCount == 0 {
+		result.hasIPv6AddressCount = true
 		result.ipv6AddressCount = 1
+	}
+	if !hasAssignPublicIPv6 && networkMode == "" && result.hasIPv6AddressCount && result.ipv6AddressCount > 0 {
+		result.assignPublicIPv6 = true
 	}
 
 	return result, nil
@@ -292,6 +288,42 @@ func parsePositiveInt32ProviderConfig(config map[string]any, key string) (int32,
 
 	if parsed <= 0 {
 		return 0, true, fmt.Errorf("provider_config.%s must be greater than zero, got %d", key, parsed)
+	}
+
+	return int32(parsed), true, nil
+}
+
+func parseNonNegativeInt32ProviderConfig(config map[string]any, key string) (int32, bool, error) {
+	value, ok := lookupProviderConfigValue(config, key)
+	if !ok {
+		return 0, false, nil
+	}
+
+	var parsed int
+	switch typed := value.(type) {
+	case float64:
+		parsed = int(typed)
+		if float64(parsed) != typed {
+			return 0, true, fmt.Errorf("provider_config.%s must be an integer, got %v", key, typed)
+		}
+	case int:
+		parsed = typed
+	case int32:
+		parsed = int(typed)
+	case int64:
+		parsed = int(typed)
+	case string:
+		var err error
+		parsed, err = strconv.Atoi(normalizeToken(typed))
+		if err != nil {
+			return 0, true, fmt.Errorf("provider_config.%s must be an integer, got %q", key, typed)
+		}
+	default:
+		return 0, true, fmt.Errorf("provider_config.%s must be an integer", key)
+	}
+
+	if parsed < 0 {
+		return 0, true, fmt.Errorf("provider_config.%s must be zero or greater, got %d", key, parsed)
 	}
 
 	return int32(parsed), true, nil

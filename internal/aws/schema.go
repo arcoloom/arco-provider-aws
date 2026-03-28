@@ -166,7 +166,7 @@ func awsComputeInstanceSchema() provider.ResourceSchema {
 				Name:        "network_mode",
 				Type:        provider.SchemaAttributeTypeString,
 				Optional:    true,
-				Description: "High-level network mode for the primary interface. Supported values: ipv4, ipv6, ipv4+ipv6. More specific network flags override this shorthand when both are set.",
+				Description: "Strict address-family mode for the primary interface. Supported values: ipv4, ipv6, ipv4+ipv6. When set, the provider enforces the requested IP family selection during subnet placement and instance launch.",
 			},
 			{
 				Name:         "cpu_credit_mode",
@@ -206,14 +206,14 @@ func awsComputeInstanceSchema() provider.ResourceSchema {
 				Name:         "assign_public_ipv6",
 				Type:         provider.SchemaAttributeTypeBool,
 				Optional:     true,
-				Description:  "Whether the instance should request a public IPv6 address.",
+				Description:  "Whether the instance should request IPv6 addresses when network_mode is not set or when compatible with the selected network mode.",
 				DefaultValue: false,
 			},
 			{
 				Name:        "ipv6_address_count",
 				Type:        provider.SchemaAttributeTypeInt64,
 				Optional:    true,
-				Description: "Number of IPv6 addresses to allocate on the primary network interface.",
+				Description: "Number of IPv6 addresses to allocate on the primary network interface. Use 0 to explicitly suppress IPv6 auto-assignment on compatible subnets.",
 			},
 			{
 				Name:         "root_volume_size_gib",

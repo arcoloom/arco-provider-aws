@@ -73,6 +73,33 @@ func TestParseStartInstanceProviderConfigSupportsNetworkMode(t *testing.T) {
 	}
 }
 
+func TestParseStartInstanceProviderConfigNetworkModeOverridesConflictingIPv6Flags(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := parseStartInstanceProviderConfig(map[string]any{
+		providerConfigNetworkMode: providerNetworkModeIPv4,
+		optionAssignPublicIPv6:    true,
+		optionIPv6AddressCount:    int64(3),
+		optionAssociatePublicIPv4: false,
+	})
+	if err != nil {
+		t.Fatalf("parseStartInstanceProviderConfig() error = %v", err)
+	}
+
+	if cfg.LaunchOptions.assignPublicIPv6 {
+		t.Fatalf("expected ipv4 network_mode to suppress ipv6 assignment, got %+v", cfg.LaunchOptions)
+	}
+	if !cfg.LaunchOptions.hasIPv6AddressCount {
+		t.Fatalf("expected ipv4 network_mode to force explicit ipv6 count handling, got %+v", cfg.LaunchOptions)
+	}
+	if cfg.LaunchOptions.ipv6AddressCount != 0 {
+		t.Fatalf("expected ipv4 network_mode to force ipv6_address_count=0, got %d", cfg.LaunchOptions.ipv6AddressCount)
+	}
+	if cfg.LaunchOptions.associatePublicIPv4 {
+		t.Fatalf("expected explicit associate_public_ipv4=false to be preserved, got %+v", cfg.LaunchOptions)
+	}
+}
+
 func TestParseStartInstanceProviderConfigRejectsInvalidNetworkMode(t *testing.T) {
 	t.Parallel()
 
