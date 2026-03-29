@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 const (
-	defaultRegistryBaseURL   = "https://registry.arcoloom.com"
 	defaultRegistryChannel   = "latest"
+	registryBaseURLEnvVar    = "ARCO_REGISTRY_BASE_URL"
+	registryChannelEnvVar    = "ARCO_REGISTRY_CHANNEL"
+	registryConfigPathEnvVar = "ARCO_CONFIG_PATH"
 	registryProviderName     = "aws"
 	registryDatasetName      = "ec2"
 	catalogResolveCachePath  = "catalog/resolve.json"
@@ -53,25 +56,25 @@ type registryDatasetFile struct {
 }
 
 func defaultRegistryDatasetSource() registryDatasetSource {
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("ARCO_REGISTRY_BASE_URL")), "/")
-	if baseURL == "" {
-		baseURL = defaultRegistryBaseURL
-	}
-	channel := strings.TrimSpace(os.Getenv("ARCO_REGISTRY_CHANNEL"))
-	if channel == "" {
-		channel = defaultRegistryChannel
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv(registryBaseURLEnvVar)), "/")
+	channel := strings.TrimSpace(os.Getenv(registryChannelEnvVar))
+	if baseURL == "" || channel == "" {
+		configSource := loadRegistryDatasetSourceFromConfig()
+		if baseURL == "" {
+			baseURL = configSource.baseURL
+		}
+		if channel == "" {
+			channel = configSource.channel
+		}
 	}
 	return registryDatasetSource{
 		baseURL: baseURL,
 		channel: channel,
-	}
+	}.normalized()
 }
 
 func (s registryDatasetSource) normalized() registryDatasetSource {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.baseURL), "/")
-	if baseURL == "" {
-		baseURL = defaultRegistryBaseURL
-	}
 	channel := strings.TrimSpace(s.channel)
 	if channel == "" {
 		channel = defaultRegistryChannel
@@ -134,6 +137,9 @@ func (r *catalogRepository) syncRegistryDataset(ctx context.Context) (*registryD
 
 func (r *catalogRepository) resolveRegistryDataset(ctx context.Context) (*registryDatasetResolveResponse, error) {
 	source := r.source.normalized()
+	if source.baseURL == "" {
+		return nil, fmt.Errorf("registry base URL is not configured")
+	}
 	resolveURL := fmt.Sprintf(
 		"%s/v1/resolve/datasets/%s/%s/%s",
 		source.baseURL,
@@ -151,6 +157,81 @@ func (r *catalogRepository) resolveRegistryDataset(ctx context.Context) (*regist
 		return nil, fmt.Errorf("decode registry dataset resolve response: %w", err)
 	}
 	return &resolved, nil
+}
+
+func loadRegistryDatasetSourceFromConfig() registryDatasetSource {
+	for _, path := range registryConfigCandidatePaths() {
+		source, ok := readRegistryDatasetSourceFromConfig(path)
+		if ok {
+			return source
+		}
+	}
+	return registryDatasetSource{}
+}
+
+func registryConfigCandidatePaths() []string {
+	candidates := make([]string, 0, 5)
+	if path := strings.TrimSpace(os.Getenv(registryConfigPathEnvVar)); path != "" {
+		candidates = append(candidates, path)
+	}
+	candidates = append(
+		candidates,
+		"config.toml",
+		"config.toml.example",
+		filepath.Join("..", "arcoloom", "config.toml"),
+		filepath.Join("..", "arcoloom", "config.toml.example"),
+	)
+	return candidates
+}
+
+func readRegistryDatasetSourceFromConfig(path string) (registryDatasetSource, bool) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return registryDatasetSource{}, false
+	}
+
+	source := registryDatasetSource{}
+	inSourceSection := false
+	for _, rawLine := range strings.Split(string(body), "\n") {
+		line := strings.TrimSpace(strings.SplitN(rawLine, "#", 2)[0])
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inSourceSection = line == "[source]"
+			continue
+		}
+		if !inSourceSection {
+			continue
+		}
+
+		key, value, ok := parseRegistryConfigAssignment(line)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "registry_base_url":
+			source.baseURL = strings.TrimRight(value, "/")
+		case "channel":
+			source.channel = value
+		}
+	}
+	if source.baseURL == "" && source.channel == "" {
+		return registryDatasetSource{}, false
+	}
+	return source.normalized(), true
+}
+
+func parseRegistryConfigAssignment(line string) (string, string, bool) {
+	key, rawValue, ok := strings.Cut(line, "=")
+	if !ok {
+		return "", "", false
+	}
+	value, err := strconv.Unquote(strings.TrimSpace(rawValue))
+	if err != nil {
+		return "", "", false
+	}
+	return strings.TrimSpace(key), strings.TrimSpace(value), true
 }
 
 func validateRegistryDatasetResolve(resolved *registryDatasetResolveResponse) error {

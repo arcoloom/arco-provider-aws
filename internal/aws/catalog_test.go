@@ -12,6 +12,8 @@ import (
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 )
 
+const testRegistryBaseURL = "https://registry.example.test"
+
 func TestListInstanceTypesFiltersByRegionFromCatalog(t *testing.T) {
 	service := newCatalogBackedTestService(t, newStaticCatalogFetcher(), &fakePricingClient{})
 
@@ -188,7 +190,11 @@ func newCatalogBackedTestService(t *testing.T, fetcher *staticCatalogFetcher, pr
 	repo := &catalogRepository{
 		baseDir: filepath.Join(t.TempDir(), "aws-cache"),
 		fetcher: fetcher,
-		now:     time.Now,
+		source: registryDatasetSource{
+			baseURL: testRegistryBaseURL,
+			channel: defaultRegistryChannel,
+		},
+		now: time.Now,
 	}
 
 	return &Service{
@@ -382,11 +388,11 @@ func newStaticCatalogFetcher() *staticCatalogFetcher {
 }
 
 func registryDatasetResolveURL() string {
-	return fmt.Sprintf("%s/v1/resolve/datasets/aws/ec2/latest", defaultRegistryBaseURL)
+	return fmt.Sprintf("%s/v1/resolve/datasets/aws/ec2/%s", testRegistryBaseURL, defaultRegistryChannel)
 }
 
 func registryDatasetDownloadURL(filename string) string {
-	return fmt.Sprintf("%s/v1/datasets/aws/ec2/test-catalog-version/%s", defaultRegistryBaseURL, filename)
+	return fmt.Sprintf("%s/v1/datasets/aws/ec2/test-catalog-version/%s", testRegistryBaseURL, filename)
 }
 
 func (f *staticCatalogFetcher) Fetch(_ context.Context, url string) ([]byte, error) {
