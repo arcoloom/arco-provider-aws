@@ -395,7 +395,20 @@ func TestBuildMarketOfferingAttributesNormalizesArchitectures(t *testing.T) {
 	t.Parallel()
 
 	attributes := buildMarketOfferingAttributes(catalogInstanceMetadataRecord{
-		Arch: []string{"x86_64", "amd64", "aarch64"},
+		InstanceType:       "c6gd.medium",
+		Family:             "Compute optimized",
+		Generation:         "current",
+		VCPU:               1,
+		Memory:             2,
+		Arch:               []string{"x86_64", "amd64", "aarch64"},
+		NetworkPerformance: "<=10G",
+		ClockSpeedGHz:      "2.5 GHz",
+		PhysicalProcessor:  "AWS Graviton2 Processor",
+		Raw: map[string]any{
+			"coremark_iterations_second": 19098.54851,
+			"memory_speed":               3200.0,
+			"base_performance":           0.95,
+		},
 	}, "pricing_api", "0.068", time.Date(2026, 3, 23, 10, 0, 0, 0, time.UTC), provider.SpotInventory{})
 
 	if got, want := attributes["architecture"], ""; got != want {
@@ -406,6 +419,24 @@ func TestBuildMarketOfferingAttributesNormalizesArchitectures(t *testing.T) {
 	}
 	if got, want := attributes["cpu_credit_mode"], "standard"; got != want {
 		t.Fatalf("attributes[cpu_credit_mode] = %q, want %q", got, want)
+	}
+	if got, want := attributes["generation_rank"], "6"; got != want {
+		t.Fatalf("attributes[generation_rank] = %q, want %q", got, want)
+	}
+	if got, want := attributes["memory_per_vcpu"], "2048"; got != want {
+		t.Fatalf("attributes[memory_per_vcpu] = %q, want %q", got, want)
+	}
+	if got, want := attributes["network_performance"], "<=10G"; got != want {
+		t.Fatalf("attributes[network_performance] = %q, want %q", got, want)
+	}
+	if got, want := attributes["coremark_iterations_second"], "19098.54851"; got != want {
+		t.Fatalf("attributes[coremark_iterations_second] = %q, want %q", got, want)
+	}
+	if got, want := attributes["memory_speed"], "3200"; got != want {
+		t.Fatalf("attributes[memory_speed] = %q, want %q", got, want)
+	}
+	if got, want := attributes["base_performance"], "0.95"; got != want {
+		t.Fatalf("attributes[base_performance] = %q, want %q", got, want)
 	}
 }
 

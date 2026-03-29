@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/arcoloom/arco-provider-aws/internal/provider"
 )
@@ -381,12 +382,24 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 	if familyClass := plannerFamilyClass(record.Family); familyClass != "" {
 		attributes["family_class"] = familyClass
 	}
-	if generationRank := plannerGenerationRank(record.Generation); generationRank != "" {
+	if generationRank := plannerGenerationRank(record.InstanceType, record.Generation); generationRank != "" {
 		attributes["generation_rank"] = generationRank
 	}
 	if memoryPerVCPU := plannerMemoryPerVCPU(float64(record.VCPU), record.Memory); memoryPerVCPU != "" {
 		attributes["memory_per_vcpu"] = memoryPerVCPU
 	}
+	if value := strings.TrimSpace(record.NetworkPerformance); value != "" {
+		attributes["network_performance"] = value
+	}
+	if value := strings.TrimSpace(record.ClockSpeedGHz); value != "" {
+		attributes["clock_speed_ghz"] = value
+	}
+	if value := strings.TrimSpace(record.PhysicalProcessor); value != "" {
+		attributes["physical_processor"] = value
+	}
+	copyRawAttribute(attributes, record.Raw, "memory_speed")
+	copyRawAttribute(attributes, record.Raw, "coremark_iterations_second")
+	copyRawAttribute(attributes, record.Raw, "base_performance")
 	if strings.TrimSpace(price) != "" {
 		attributes["spot_price"] = strings.TrimSpace(price)
 	}
@@ -403,6 +416,19 @@ func buildMarketOfferingAttributes(record catalogInstanceMetadataRecord, source 
 		attributes["capacity_score"] = strconv.FormatInt(int64(inventory.CapacityScore), 10)
 	}
 	return attributes
+}
+
+func copyRawAttribute(attributes map[string]string, raw map[string]any, key string) {
+	if len(attributes) == 0 || len(raw) == 0 {
+		return
+	}
+	value, ok := raw[key]
+	if !ok {
+		return
+	}
+	if normalized := strings.TrimSpace(stringifyAttribute(value)); normalized != "" {
+		attributes[key] = normalized
+	}
 }
 
 func normalizeBurstMinutes(value any) string {
@@ -480,8 +506,21 @@ func plannerFamilyClass(value string) string {
 	}
 }
 
-func plannerGenerationRank(value string) string {
-	switch normalizeToken(value) {
+func plannerGenerationRank(instanceType string, generation string) string {
+	trimmed := strings.TrimSpace(instanceType)
+	for i := 0; i < len(trimmed); i++ {
+		if !unicode.IsDigit(rune(trimmed[i])) {
+			continue
+		}
+		j := i
+		for j < len(trimmed) && unicode.IsDigit(rune(trimmed[j])) {
+			j++
+		}
+		if value, err := strconv.ParseFloat(trimmed[i:j], 64); err == nil && value > 0 {
+			return strconv.FormatFloat(value, 'f', -1, 64)
+		}
+	}
+	switch normalizeToken(generation) {
 	case "current":
 		return "4"
 	case "previous":
@@ -495,7 +534,7 @@ func plannerMemoryPerVCPU(vcpu float64, memoryGiB float64) string {
 	if vcpu <= 0 || memoryGiB <= 0 {
 		return ""
 	}
-	return strconv.FormatFloat(memoryGiB/vcpu, 'f', 2, 64)
+	return strconv.FormatFloat(memoryGiB*1024.0/vcpu, 'f', -1, 64)
 }
 
 func availabilityZoneID(zoneIDToName map[string]string, zoneName string) string {
